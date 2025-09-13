@@ -1,64 +1,115 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Menu from '../Components/Menu';
+import { 
+  FaUsers, 
+  FaUserPlus, 
+  FaEdit, 
+  FaTrash, 
+  FaDownload, 
+  FaUpload, 
+  FaFileExport, 
+  FaSearch,
+  FaTimes,
+  FaSave,
+  FaBuilding,
+  FaGraduationCap,
+  FaCheckCircle,
+  FaSpinner,
+  FaExclamationTriangle
+} from 'react-icons/fa';
+import { 
+  FiFilter, 
+  FiFileText, 
+  FiMail, 
+  FiPhone, 
+  FiUser,
+  FiBook,
+  FiAward,
+  FiBriefcase
+} from 'react-icons/fi';
+import {
+  getAllTeachers,
+  addTeacher,
+  updateTeacher,
+  deleteTeacher,
+  parseAndValidateCSV,
+  batchUploadTeachers,
+  generateCSVTemplate,
+  exportTeachersToCSV,
+  getTeacherStatistics
+} from '../services/TeacherLoad';
 
 const TeacherLoad = () => {
-  // Sample teacher data
-  const [teachers, setTeachers] = useState([
-    {
-      id: 1,
-      teacherCode: 'T001',
-      name: 'Dr. John Smith',
-      department: 'Computer Science',
-      designation: 'Professor',
-      email: 'john.smith@university.edu',
-      phone: '+1-234-567-8900',
-      qualification: 'PhD Computer Science',
-      experience: '15 years',
-      specialization: 'Machine Learning, AI'
-    },
-    {
-      id: 2,
-      teacherCode: 'T002',
-      name: 'Prof. Sarah Johnson',
-      department: 'Mathematics',
-      designation: 'Associate Professor',
-      email: 'sarah.johnson@university.edu',
-      phone: '+1-234-567-8901',
-      qualification: 'PhD Mathematics',
-      experience: '12 years',
-      specialization: 'Statistics, Calculus'
-    },
-    {
-      id: 3,
-      teacherCode: 'T003',
-      name: 'Dr. Michael Brown',
-      department: 'Physics',
-      designation: 'Assistant Professor',
-      email: 'michael.brown@university.edu',
-      phone: '+1-234-567-8902',
-      qualification: 'PhD Physics',
-      experience: '8 years',
-      specialization: 'Quantum Physics'
-    }
-  ]);
-
+  const [teachers, setTeachers] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingTeacher, setEditingTeacher] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDepartment, setFilterDepartment] = useState('');
+  const [statistics, setStatistics] = useState(null);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
   // Form state
   const [formData, setFormData] = useState({
-    teacherCode: '',
     name: '',
+    code: '',
     department: '',
+    faculty: '',
+    qualification: '',
+    years: '',
     designation: '',
     email: '',
     phone: '',
-    qualification: '',
-    experience: '',
     specialization: ''
   });
+
+  // Load teachers on component mount
+  useEffect(() => {
+    loadTeachers();
+    loadStatistics();
+  }, []);
+
+  // Load all teachers from Firebase
+  const loadTeachers = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const result = await getAllTeachers();
+      if (result.success) {
+        setTeachers(result.data);
+      } else {
+        setError(result.error);
+      }
+    } catch (err) {
+      setError('Failed to load teachers');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Load statistics
+  const loadStatistics = async () => {
+    try {
+      const result = await getTeacherStatistics();
+      if (result.success) {
+        setStatistics(result.data);
+      }
+    } catch (err) {
+      console.error('Failed to load statistics:', err);
+    }
+  };
+
+  // Clear messages after 5 seconds
+  useEffect(() => {
+    if (success || error) {
+      const timer = setTimeout(() => {
+        setSuccess('');
+        setError('');
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [success, error]);
 
   // Get unique departments for filter
   const departments = [...new Set(teachers.map(teacher => teacher.department))];
@@ -66,7 +117,7 @@ const TeacherLoad = () => {
   // Filter teachers based on search and department
   const filteredTeachers = teachers.filter(teacher => {
     const matchesSearch = teacher.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         teacher.teacherCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         teacher.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          teacher.department.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesDepartment = filterDepartment === '' || teacher.department === filterDepartment;
     return matchesSearch && matchesDepartment;
@@ -79,36 +130,40 @@ const TeacherLoad = () => {
     });
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (editingTeacher) {
-      // Update existing teacher
-      setTeachers(teachers.map(teacher => 
-        teacher.id === editingTeacher.id 
-          ? { ...formData, id: editingTeacher.id }
-          : teacher
-      ));
-      setEditingTeacher(null);
-    } else {
-      // Add new teacher
-      const newTeacher = {
-        ...formData,
-        id: Date.now()
-      };
-      setTeachers([...teachers, newTeacher]);
+    setError('');
+    setSuccess('');
+    
+    try {
+      if (editingTeacher) {
+        // Update existing teacher
+        const result = await updateTeacher(editingTeacher.id, formData);
+        if (result.success) {
+          setSuccess('Teacher updated successfully!');
+          await loadTeachers();
+          await loadStatistics();
+        } else {
+          setError(result.error);
+        }
+      } else {
+        // Add new teacher
+        const result = await addTeacher(formData);
+        if (result.success) {
+          setSuccess('Teacher added successfully!');
+          await loadTeachers();
+          await loadStatistics();
+        } else {
+          setError(result.error);
+        }
+      }
+      
+      if (!error) {
+        resetForm();
+      }
+    } catch (err) {
+      setError('An unexpected error occurred');
     }
-    setFormData({
-      teacherCode: '',
-      name: '',
-      department: '',
-      designation: '',
-      email: '',
-      phone: '',
-      qualification: '',
-      experience: '',
-      specialization: ''
-    });
-    setShowAddForm(false);
   };
 
   const handleEdit = (teacher) => {
@@ -117,261 +172,457 @@ const TeacherLoad = () => {
     setShowAddForm(true);
   };
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     if (window.confirm('Are you sure you want to delete this teacher?')) {
-      setTeachers(teachers.filter(teacher => teacher.id !== id));
+      setError('');
+      setSuccess('');
+      
+      try {
+        const result = await deleteTeacher(id);
+        if (result.success) {
+          setSuccess('Teacher deleted successfully!');
+          await loadTeachers();
+          await loadStatistics();
+        } else {
+          setError(result.error);
+        }
+      } catch (err) {
+        setError('Failed to delete teacher');
+      }
     }
   };
 
-  const handleFileUpload = (event) => {
+  const handleFileUpload = async (event) => {
     const file = event.target.files[0];
-    if (file) {
-      alert(`File "${file.name}" selected. CSV upload functionality will be implemented soon!`);
+    if (!file) return;
+
+    setError('');
+    setSuccess('');
+
+    if (file.type !== 'text/csv') {
+      setError('Please select a CSV file');
+      return;
     }
+
+    try {
+      const csvText = await file.text();
+      const parseResult = parseAndValidateCSV(csvText);
+      
+      if (!parseResult.isValid) {
+        setError(`CSV validation failed: ${parseResult.errors.join(', ')}`);
+        return;
+      }
+
+      // Confirm upload
+      const confirmUpload = window.confirm(
+        `Ready to upload ${parseResult.data.length} teachers. Continue?`
+      );
+      
+      if (!confirmUpload) return;
+
+      const uploadResult = await batchUploadTeachers(parseResult.data);
+      if (uploadResult.success) {
+        setSuccess(uploadResult.data.message);
+        await loadTeachers();
+        await loadStatistics();
+      } else {
+        setError(uploadResult.error);
+      }
+    } catch (err) {
+      setError('Failed to process CSV file');
+    }
+    
+    // Reset file input
+    event.target.value = '';
   };
 
   const handleExport = () => {
-    alert('Export to CSV functionality will be implemented soon!');
+    try {
+      const csvContent = exportTeachersToCSV(filteredTeachers);
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `teachers_export_${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      setSuccess('Teachers data exported successfully!');
+    } catch (err) {
+      setError('Failed to export data');
+    }
+  };
+
+  const handleDownloadTemplate = () => {
+    try {
+      const template = generateCSVTemplate();
+      const blob = new Blob([template], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'teacher_upload_template.csv';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      setSuccess('Template downloaded successfully!');
+    } catch (err) {
+      setError('Failed to download template');
+    }
   };
 
   const resetForm = () => {
     setFormData({
-      teacherCode: '',
       name: '',
+      code: '',
       department: '',
+      faculty: '',
+      qualification: '',
+      years: '',
       designation: '',
       email: '',
       phone: '',
-      qualification: '',
-      experience: '',
       specialization: ''
     });
     setEditingTeacher(null);
     setShowAddForm(false);
+    setError('');
+    setSuccess('');
   };
 
   return (
-    <div className="flex min-h-screen">
+    <div className="min-h-screen bg-gray-50">
       <Menu />
-      <div className="flex-1 transition-all duration-300 p-8 bg-slate-50 min-h-screen font-sans overflow-x-auto">
+      <div style={{ marginLeft: 'var(--menu-width, 288px)' }} className="transition-all duration-300 p-8 min-h-screen font-sans">
         {/* Header Section */}
         <div className="mb-8">
-          <div className="bg-gradient-to-br from-blue-600 to-purple-700 text-white p-8 rounded-2xl shadow-xl">
-            <h1 className="text-4xl font-bold mb-2 flex items-center gap-3">
-              👨‍🏫 Teacher Management
-            </h1>
-            <p className="text-xl opacity-90">
-              Manage faculty data, upload records, and maintain teacher information
-            </p>
+          <div className="bg-gradient-to-r from-slate-800 via-slate-700 to-slate-600 text-white p-8 rounded-xl shadow-sm border border-slate-200">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between">
+              <div className="mb-4 lg:mb-0">
+                <h1 className="text-3xl font-semibold mb-2 flex items-center gap-3">
+                  <FaUsers className="text-2xl" />
+                  Teacher Management
+                </h1>
+                <p className="text-lg opacity-90 font-light">
+                  Manage faculty data, upload records, and maintain teacher information
+                </p>
+              </div>
+              
+              {/* Statistics Cards */}
+              {statistics && (
+                <div className="flex gap-4">
+                  <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 text-center">
+                    <FaUsers className="text-2xl mx-auto mb-2" />
+                    <div className="text-2xl font-bold">{statistics.totalTeachers || 0}</div>
+                    <div className="text-sm opacity-80">Total Teachers</div>
+                  </div>
+                  <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 text-center">
+                    <FaBuilding className="text-2xl mx-auto mb-2" />
+                    <div className="text-2xl font-bold">{statistics.totalDepartments || 0}</div>
+                    <div className="text-sm opacity-80">Departments</div>
+                  </div>
+                  <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 text-center">
+                    <FaGraduationCap className="text-2xl mx-auto mb-2" />
+                    <div className="text-2xl font-bold">{statistics.totalFaculties || 0}</div>
+                    <div className="text-sm opacity-80">Faculties</div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Action Bar */}
-        <div className="bg-white rounded-xl p-6 shadow-lg border border-gray-200 mb-6">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            {/* Search and Filter */}
-            <div className="flex flex-wrap items-center gap-4">
-              <div className="relative">
-                <input
-                  type="text"
-                  placeholder="Search teachers..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                />
-                <span className="absolute left-3 top-2.5 text-gray-400">🔍</span>
-              </div>
-              
-              <select
-                value={filterDepartment}
-                onChange={(e) => setFilterDepartment(e.target.value)}
-                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-              >
-                <option value="">All Departments</option>
-                {departments.map(dept => (
-                  <option key={dept} value={dept}>{dept}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex flex-wrap items-center gap-3">
-              <button
-                onClick={() => setShowAddForm(true)}
-                className="px-6 py-2 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-colors duration-200 flex items-center gap-2"
-              >
-                ➕ Add Teacher
-              </button>
-              
-              <label className="px-6 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors duration-200 cursor-pointer flex items-center gap-2">
-                📤 Upload CSV
-                <input
-                  type="file"
-                  accept=".csv"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
-              </label>
-              
-              <button
-                onClick={handleExport}
-                className="px-6 py-2 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 transition-colors duration-200 flex items-center gap-2"
-              >
-                📥 Export
-              </button>
+        {/* Success/Error Messages */}
+        {(success || error) && (
+          <div className={`mb-6 p-4 rounded-lg border ${success ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+            <div className="flex items-center gap-3">
+              {success ? <FaCheckCircle className="text-lg" /> : <FaExclamationTriangle className="text-lg" />}
+              <span className="font-medium">{success || error}</span>
             </div>
           </div>
+        )}
+
+        {/* Loading State */}
+        {loading && (
+          <div className="text-center py-16">
+            <FaSpinner className="text-4xl text-slate-400 mx-auto mb-4 animate-spin" />
+            <h3 className="text-lg font-medium text-slate-700">Loading teachers...</h3>
+          </div>
+        )}
+
+        {/* Action Buttons */}
+        <div className="mb-6 flex flex-wrap gap-4">
+          <button
+            onClick={() => setShowAddForm(true)}
+            className="bg-slate-700 text-white px-6 py-3 rounded-lg font-medium hover:bg-slate-800 transition-colors flex items-center gap-2 shadow-sm"
+          >
+            <FaUserPlus />
+            Add New Teacher
+          </button>
+          
+          <label className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center gap-2 shadow-sm cursor-pointer">
+            <FaUpload />
+            Upload CSV
+            <input
+              type="file"
+              accept=".csv"
+              onChange={handleFileUpload}
+              className="hidden"
+            />
+          </label>
+          
+          <button
+            onClick={handleExport}
+            disabled={filteredTeachers.length === 0}
+            className="bg-emerald-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-emerald-700 disabled:bg-slate-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shadow-sm"
+          >
+            <FaFileExport />
+            Export CSV
+          </button>
+          
+          <button
+            onClick={handleDownloadTemplate}
+            className="bg-indigo-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-indigo-700 transition-colors flex items-center gap-2 shadow-sm"
+          >
+            <FiFileText />
+            Download Template
+          </button>
+        </div>
+
+        {/* Search and Filter */}
+        <div className="mb-6 flex flex-wrap gap-4">
+          <div className="relative">
+            <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search teachers..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent outline-none w-64"
+            />
+          </div>
+          
+          <select
+            value={filterDepartment}
+            onChange={(e) => setFilterDepartment(e.target.value)}
+            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent outline-none"
+          >
+            <option value="">All Departments</option>
+            {departments.map(dept => (
+              <option key={dept} value={dept}>{dept}</option>
+            ))}
+          </select>
         </div>
 
         {/* Add/Edit Form Modal */}
         {showAddForm && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl p-8 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="bg-white rounded-xl p-8 max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-xl">
               <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-bold text-gray-800">
-                  {editingTeacher ? '✏️ Edit Teacher' : '➕ Add New Teacher'}
+                <h2 className="text-2xl font-semibold text-slate-800 flex items-center gap-3">
+                  {editingTeacher ? <FaEdit className="text-xl" /> : <FaUserPlus className="text-xl" />}
+                  {editingTeacher ? 'Edit Teacher' : 'Add New Teacher'}
                 </h2>
                 <button
                   onClick={resetForm}
-                  className="text-gray-500 hover:text-gray-700 text-2xl"
+                  className="text-slate-500 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100 transition-colors"
                 >
-                  ✕
+                  <FaTimes className="text-xl" />
                 </button>
               </div>
               
               <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Teacher Code *</label>
-                  <input
-                    type="text"
-                    name="teacherCode"
-                    value={formData.teacherCode}
-                    onChange={handleInputChange}
-                    required
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                    placeholder="e.g., T001"
-                  />
+                {/* Required Fields Section */}
+                <div className="md:col-span-2 mb-4">
+                  <h3 className="text-lg font-medium text-slate-700 mb-3 flex items-center gap-2">
+                    <FaExclamationTriangle className="text-orange-500 text-sm" />
+                    Required Information
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
+                        <FiUser className="text-sm" />
+                        Teacher Code *
+                      </label>
+                      <input
+                        type="text"
+                        name="code"
+                        value={formData.code}
+                        onChange={handleInputChange}
+                        required
+                        className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent outline-none transition-all"
+                        placeholder="e.g., T001"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
+                        <FiUser className="text-sm" />
+                        Full Name *
+                      </label>
+                      <input
+                        type="text"
+                        name="name"
+                        value={formData.name}
+                        onChange={handleInputChange}
+                        required
+                        className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent outline-none transition-all"
+                        placeholder="e.g., Dr. John Smith"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
+                        <FaBuilding className="text-sm" />
+                        Department *
+                      </label>
+                      <input
+                        type="text"
+                        name="department"
+                        value={formData.department}
+                        onChange={handleInputChange}
+                        required
+                        className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent outline-none transition-all"
+                        placeholder="e.g., Computer Science"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
+                        <FaGraduationCap className="text-sm" />
+                        Faculty *
+                      </label>
+                      <input
+                        type="text"
+                        name="faculty"
+                        value={formData.faculty}
+                        onChange={handleInputChange}
+                        required
+                        className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent outline-none transition-all"
+                        placeholder="e.g., Engineering"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Optional Fields Section */}
+                <div className="md:col-span-2 mb-4">
+                  <h3 className="text-lg font-medium text-slate-700 mb-3 flex items-center gap-2">
+                    <FiBook className="text-blue-500 text-sm" />
+                    Additional Information (Optional)
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
+                        <FiBriefcase className="text-sm" />
+                        Designation
+                      </label>
+                      <select
+                        name="designation"
+                        value={formData.designation}
+                        onChange={handleInputChange}
+                        className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent outline-none transition-all"
+                      >
+                        <option value="">Select Designation</option>
+                        <option value="Professor">Professor</option>
+                        <option value="Associate Professor">Associate Professor</option>
+                        <option value="Assistant Professor">Assistant Professor</option>
+                        <option value="Lecturer">Lecturer</option>
+                        <option value="Senior Lecturer">Senior Lecturer</option>
+                        <option value="Instructor">Instructor</option>
+                      </select>
+                    </div>
+                    
+                    <div>
+                      <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
+                        <FiMail className="text-sm" />
+                        Email
+                      </label>
+                      <input
+                        type="email"
+                        name="email"
+                        value={formData.email}
+                        onChange={handleInputChange}
+                        className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent outline-none transition-all"
+                        placeholder="e.g., john.smith@university.edu"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
+                        <FiPhone className="text-sm" />
+                        Phone
+                      </label>
+                      <input
+                        type="tel"
+                        name="phone"
+                        value={formData.phone}
+                        onChange={handleInputChange}
+                        className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent outline-none transition-all"
+                        placeholder="e.g., +1-234-567-8900"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
+                        <FiAward className="text-sm" />
+                        Qualification
+                      </label>
+                      <input
+                        type="text"
+                        name="qualification"
+                        value={formData.qualification}
+                        onChange={handleInputChange}
+                        className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent outline-none transition-all"
+                        placeholder="e.g., PhD Computer Science"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
+                        <FiBook className="text-sm" />
+                        Years of Experience
+                      </label>
+                      <input
+                        type="text"
+                        name="years"
+                        value={formData.years}
+                        onChange={handleInputChange}
+                        className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent outline-none transition-all"
+                        placeholder="e.g., 10"
+                      />
+                    </div>
+                    
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-medium text-slate-700 mb-2">Specialization</label>
+                      <textarea
+                        name="specialization"
+                        value={formData.specialization}
+                        onChange={handleInputChange}
+                        rows="3"
+                        className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent outline-none transition-all"
+                        placeholder="e.g., Machine Learning, Artificial Intelligence, Data Structures"
+                      />
+                    </div>
+                  </div>
                 </div>
                 
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Full Name *</label>
-                  <input
-                    type="text"
-                    name="name"
-                    value={formData.name}
-                    onChange={handleInputChange}
-                    required
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                    placeholder="e.g., Dr. John Smith"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Department *</label>
-                  <input
-                    type="text"
-                    name="department"
-                    value={formData.department}
-                    onChange={handleInputChange}
-                    required
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                    placeholder="e.g., Computer Science"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Designation *</label>
-                  <select
-                    name="designation"
-                    value={formData.designation}
-                    onChange={handleInputChange}
-                    required
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                  >
-                    <option value="">Select Designation</option>
-                    <option value="Professor">Professor</option>
-                    <option value="Associate Professor">Associate Professor</option>
-                    <option value="Assistant Professor">Assistant Professor</option>
-                    <option value="Lecturer">Lecturer</option>
-                    <option value="Senior Lecturer">Senior Lecturer</option>
-                    <option value="Instructor">Instructor</option>
-                  </select>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Email *</label>
-                  <input
-                    type="email"
-                    name="email"
-                    value={formData.email}
-                    onChange={handleInputChange}
-                    required
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                    placeholder="e.g., john.smith@university.edu"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Phone</label>
-                  <input
-                    type="tel"
-                    name="phone"
-                    value={formData.phone}
-                    onChange={handleInputChange}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                    placeholder="e.g., +1-234-567-8900"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Qualification</label>
-                  <input
-                    type="text"
-                    name="qualification"
-                    value={formData.qualification}
-                    onChange={handleInputChange}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                    placeholder="e.g., PhD Computer Science"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Experience</label>
-                  <input
-                    type="text"
-                    name="experience"
-                    value={formData.experience}
-                    onChange={handleInputChange}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                    placeholder="e.g., 10 years"
-                  />
-                </div>
-                
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Specialization</label>
-                  <textarea
-                    name="specialization"
-                    value={formData.specialization}
-                    onChange={handleInputChange}
-                    rows="3"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                    placeholder="e.g., Machine Learning, Artificial Intelligence, Data Structures"
-                  />
-                </div>
-                
-                <div className="md:col-span-2 flex gap-4 pt-4">
+                <div className="md:col-span-2 flex gap-4 pt-6 border-t border-slate-200">
                   <button
                     type="submit"
-                    className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors duration-200"
+                    className="flex-1 bg-slate-700 text-white py-3 rounded-lg font-medium hover:bg-slate-800 transition-colors duration-200 flex items-center justify-center gap-2"
                   >
-                    {editingTeacher ? '💾 Update Teacher' : '➕ Add Teacher'}
+                    <FaSave className="text-sm" />
+                    {editingTeacher ? 'Update Teacher' : 'Add Teacher'}
                   </button>
                   <button
                     type="button"
                     onClick={resetForm}
-                    className="flex-1 bg-gray-500 text-white py-3 rounded-lg font-semibold hover:bg-gray-600 transition-colors duration-200"
+                    className="flex-1 bg-slate-400 text-white py-3 rounded-lg font-medium hover:bg-slate-500 transition-colors duration-200 flex items-center justify-center gap-2"
                   >
-                    ❌ Cancel
+                    <FaTimes className="text-sm" />
+                    Cancel
                   </button>
                 </div>
               </form>
@@ -380,63 +631,71 @@ const TeacherLoad = () => {
         )}
 
         {/* Teachers Table */}
-        <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-          <div className="p-6 border-b border-gray-200">
-            <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-              📊 Teachers Database ({filteredTeachers.length} records)
+        {!loading && (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="p-6 border-b border-slate-200">
+            <h2 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
+              <FaUsers className="text-lg" />
+              Teachers Database ({filteredTeachers.length} records)
             </h2>
           </div>
           
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-gray-50">
+              <thead className="bg-slate-50">
                 <tr>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Code</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Name</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Department</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Designation</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Email</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Experience</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-slate-600 uppercase tracking-wider">Code</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-slate-600 uppercase tracking-wider">Name</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-slate-600 uppercase tracking-wider">Department</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-slate-600 uppercase tracking-wider">Faculty</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-slate-600 uppercase tracking-wider">Designation</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-slate-600 uppercase tracking-wider">Email</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-slate-600 uppercase tracking-wider">Experience</th>
+                  <th className="px-6 py-4 text-left text-xs font-medium text-slate-600 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
+              <tbody className="divide-y divide-slate-200">
                 {filteredTeachers.map((teacher, index) => (
-                  <tr key={teacher.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-blue-600">
-                      {teacher.teacherCode}
+                  <tr key={teacher.id} className={index % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-slate-700">
+                      {teacher.code}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">{teacher.name}</div>
-                      <div className="text-sm text-gray-500">{teacher.qualification}</div>
+                      <div className="text-sm font-medium text-slate-900">{teacher.name}</div>
+                      <div className="text-sm text-slate-500">{teacher.qualification}</div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
                       {teacher.department}
                     </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
+                      {teacher.faculty}
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                      <span className="inline-flex px-3 py-1 text-xs font-medium rounded-full bg-slate-100 text-slate-700">
                         {teacher.designation}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
                       {teacher.email}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {teacher.experience}
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
+                      {teacher.years} {teacher.years && 'years'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                       <div className="flex gap-2">
                         <button
                           onClick={() => handleEdit(teacher)}
-                          className="text-blue-600 hover:text-blue-900 px-3 py-1 rounded-md hover:bg-blue-50 transition-colors duration-200"
+                          className="text-slate-600 hover:text-slate-900 px-3 py-1.5 rounded-md hover:bg-slate-100 transition-colors duration-200 flex items-center gap-1"
                         >
-                          ✏️ Edit
+                          <FaEdit className="text-xs" />
+                          Edit
                         </button>
                         <button
                           onClick={() => handleDelete(teacher.id)}
-                          className="text-red-600 hover:text-red-900 px-3 py-1 rounded-md hover:bg-red-50 transition-colors duration-200"
+                          className="text-red-600 hover:text-red-800 px-3 py-1.5 rounded-md hover:bg-red-50 transition-colors duration-200 flex items-center gap-1"
                         >
-                          🗑️ Delete
+                          <FaTrash className="text-xs" />
+                          Delete
                         </button>
                       </div>
                     </td>
@@ -446,67 +705,24 @@ const TeacherLoad = () => {
             </table>
             
             {filteredTeachers.length === 0 && (
-              <div className="text-center py-12">
-                <div className="text-6xl mb-4">👥</div>
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No teachers found</h3>
-                <p className="text-gray-500 mb-4">
+              <div className="text-center py-16">
+                <FaUsers className="text-5xl text-slate-300 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-slate-700 mb-2">No teachers found</h3>
+                <p className="text-slate-500 mb-6">
                   {searchTerm || filterDepartment ? 'Try adjusting your search or filter criteria.' : 'Get started by adding your first teacher.'}
                 </p>
                 <button
                   onClick={() => setShowAddForm(true)}
-                  className="px-6 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors duration-200"
+                  className="px-6 py-2.5 bg-slate-700 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors duration-200 flex items-center gap-2 mx-auto"
                 >
-                  ➕ Add First Teacher
+                  <FaUserPlus className="text-sm" />
+                  Add First Teacher
                 </button>
               </div>
             )}
           </div>
         </div>
-
-        {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mt-8">
-          <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Total Teachers</p>
-                <p className="text-2xl font-bold text-gray-900">{teachers.length}</p>
-              </div>
-              <div className="text-3xl">👨‍🏫</div>
-            </div>
-          </div>
-          
-          <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Departments</p>
-                <p className="text-2xl font-bold text-gray-900">{departments.length}</p>
-              </div>
-              <div className="text-3xl">🏢</div>
-            </div>
-          </div>
-          
-          <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Professors</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {teachers.filter(t => t.designation.includes('Professor')).length}
-                </p>
-              </div>
-              <div className="text-3xl">🎓</div>
-            </div>
-          </div>
-          
-          <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Active Records</p>
-                <p className="text-2xl font-bold text-green-600">{filteredTeachers.length}</p>
-              </div>
-              <div className="text-3xl">✅</div>
-            </div>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );
