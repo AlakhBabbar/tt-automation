@@ -1,8 +1,8 @@
 import './App.css'
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom'
 import TimeTable from './pages/TimeTable'
-// import CourseLoad from './pages/CourseLoad'
-// import RoomLoad from './pages/RoomLoad'
+import CourseLoad from './pages/CourseLoad'
+import RoomLoad from './pages/RoomLoad'
 import TeacherLoad from './pages/TeacherLoad'
 
 function App() {
@@ -10,9 +10,9 @@ function App() {
     <Router>
           <Routes>
             <Route path="/" element={<TimeTable />} />
-            {/* <Route path="/courses" element={<CourseLoad />} /> */}
+            <Route path="/courses" element={<CourseLoad />} />
             <Route path="/teachers" element={<TeacherLoad />} />
-            {/* <Route path="/rooms" element={<RoomLoad />} /> */}
+            <Route path="/rooms" element={<RoomLoad />} />
           </Routes>
     </Router>
   )
