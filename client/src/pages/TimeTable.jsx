@@ -71,6 +71,7 @@ const TimeTable = () => {
       semester: '',
       type: '',
       batch: '',
+      overallCredits: '',
       isActive: true,
       isModified: false
     }
@@ -215,6 +216,7 @@ const TimeTable = () => {
       semester: '',
       type: '',
       batch: '',
+      overallCredits: '',
       isActive: false,
       isModified: false
     };
@@ -244,6 +246,7 @@ const TimeTable = () => {
       semester: timetable.semester,
       type: timetable.type,
       batch: timetable.batch || '',
+      overallCredits: timetable.overallCredits || '',
       isActive: false,
       isModified: false
     };
@@ -391,6 +394,11 @@ const TimeTable = () => {
       // Only include batch if it exists
       if (activeTab.batch) {
         timetableData.batch = activeTab.batch;
+      }
+
+      // Only include overallCredits if it exists
+      if (activeTab.overallCredits) {
+        timetableData.overallCredits = activeTab.overallCredits;
       }
 
       // Add the schedule data (monday, tuesday, etc.)
@@ -713,7 +721,7 @@ const TimeTable = () => {
             <div className="bg-white rounded-b-xl shadow-sm border border-slate-200 p-4">
               
               {/* Tab Configuration Fields */}
-              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3 mb-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">Course</label>
                   <input
@@ -761,6 +769,19 @@ const TimeTable = () => {
                     <option value="full-time">Full Time</option>
                     <option value="part-time">Part Time</option>
                   </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Overall Credits</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    value={activeTab?.overallCredits || ''}
+                    onChange={(e) => updateTabField('overallCredits', e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                    placeholder="e.g., 37.5, 40"
+                  />
                 </div>
 
                 <div className="flex items-end">

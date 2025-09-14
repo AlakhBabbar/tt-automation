@@ -39,6 +39,7 @@ import {
   exportCoursesToCSV,
   getCourseStatistics
 } from '../services/CourseLoad';
+import { getTeachersByDepartment } from '../services/TeacherLoad';
 
 const CourseLoad = () => {
   const [courses, setCourses] = useState([]);
@@ -50,6 +51,11 @@ const CourseLoad = () => {
   const [statistics, setStatistics] = useState(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [activeTab, setActiveTab] = useState('management'); // 'management' or 'assign'
+  const [teachersByDepartment, setTeachersByDepartment] = useState({});
+  const [loadingTeachers, setLoadingTeachers] = useState(false);
+  const [selectedTeachers, setSelectedTeachers] = useState({}); // courseId -> teacherIds
+  const [teachersLoaded, setTeachersLoaded] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -78,6 +84,16 @@ const CourseLoad = () => {
       const result = await getAllCourses();
       if (result.success) {
         setCourses(result.data);
+        
+        // Initialize selected teachers from existing assignments
+        const initialSelections = {};
+        result.data.forEach(course => {
+          if (course.assignedTeachers && course.assignedTeachers.length > 0) {
+            // We'll need to map teacher names back to IDs when teachers are loaded
+            initialSelections[course.id] = course.assignedTeachers;
+          }
+        });
+        // Note: We'll convert names to IDs after loading teachers
       } else {
         setError(result.error);
       }
@@ -97,6 +113,135 @@ const CourseLoad = () => {
       }
     } catch (err) {
       console.error('Failed to load statistics:', err);
+    }
+  };
+
+  // Load teachers by department
+  const loadTeachersByDepartment = async (department) => {
+    if (teachersByDepartment[department]) {
+      return; // Already loaded
+    }
+
+    setLoadingTeachers(true);
+    try {
+      const result = await getTeachersByDepartment(department);
+      if (result.success) {
+        setTeachersByDepartment(prev => ({
+          ...prev,
+          [department]: result.data
+        }));
+      } else {
+        setError(`Failed to load teachers for ${department}: ${result.error}`);
+      }
+    } catch (err) {
+      setError(`Failed to load teachers for ${department}`);
+    } finally {
+      setLoadingTeachers(false);
+    }
+  };
+
+  // Load all teachers for all departments in courses
+  const loadAllTeachers = async () => {
+    if (teachersLoaded) return;
+
+    setLoadingTeachers(true);
+    setError('');
+    
+    try {
+      // Get unique departments from courses
+      const departments = [...new Set(courses.map(course => course.department).filter(Boolean))];
+      
+      // Load teachers for each department
+      const teacherPromises = departments.map(async (department) => {
+        const result = await getTeachersByDepartment(department);
+        return { department, result };
+      });
+
+      const results = await Promise.all(teacherPromises);
+      
+      const newTeachersByDepartment = {};
+      results.forEach(({ department, result }) => {
+        if (result.success) {
+          newTeachersByDepartment[department] = result.data;
+        } else {
+          console.error(`Failed to load teachers for ${department}:`, result.error);
+        }
+      });
+
+      setTeachersByDepartment(newTeachersByDepartment);
+      setTeachersLoaded(true);
+    } catch (err) {
+      setError('Failed to load teachers');
+      console.error('Error loading teachers:', err);
+    } finally {
+      setLoadingTeachers(false);
+    }
+  };
+
+  // Load teachers when switching to assign tab
+  useEffect(() => {
+    if (activeTab === 'assign' && courses.length > 0 && !teachersLoaded) {
+      loadAllTeachers();
+    }
+  }, [activeTab, courses, teachersLoaded]);
+
+  // Handle teacher selection for a course
+  const handleTeacherSelection = (courseId, teacherId, isSelected) => {
+    setSelectedTeachers(prev => {
+      const courseTeachers = prev[courseId] || [];
+      if (isSelected) {
+        // Add teacher if not already selected
+        if (!courseTeachers.includes(teacherId)) {
+          return {
+            ...prev,
+            [courseId]: [...courseTeachers, teacherId]
+          };
+        }
+      } else {
+        // Remove teacher
+        return {
+          ...prev,
+          [courseId]: courseTeachers.filter(id => id !== teacherId)
+        };
+      }
+      return prev;
+    });
+  };
+
+  // Save teacher assignments for a course
+  const saveTeacherAssignments = async (courseId) => {
+    const teacherIds = selectedTeachers[courseId] || [];
+    const course = courses.find(c => c.id === courseId);
+    
+    if (!course) {
+      setError('Course not found');
+      return;
+    }
+
+    // Get teacher names for the assignment
+    const department = course.department;
+    const departmentTeachers = teachersByDepartment[department] || [];
+    const assignedTeacherNames = teacherIds.map(id => {
+      const teacher = departmentTeachers.find(t => t.id === id);
+      return teacher ? teacher.name : null;
+    }).filter(Boolean);
+
+    try {
+      const updatedCourseData = {
+        ...course,
+        assignedTeachers: assignedTeacherNames,
+        teachers: assignedTeacherNames.join(', ') // For backward compatibility
+      };
+
+      const result = await updateCourse(courseId, updatedCourseData);
+      if (result.success) {
+        setSuccess('Teacher assignments saved successfully!');
+        await loadCourses(); // Reload courses to show updated assignments
+      } else {
+        setError(result.error);
+      }
+    } catch (err) {
+      setError('Failed to save teacher assignments');
     }
   };
 
@@ -275,12 +420,37 @@ const CourseLoad = () => {
           <div className="bg-gradient-to-r from-slate-800 via-slate-700 to-slate-600 text-white p-8 rounded-xl shadow-sm border border-slate-200">
             <div className="flex items-center justify-between">
               <div>
-                <h1 className="text-3xl font-semibold mb-2 flex items-center gap-3">
-                  <FaBook className="text-2xl" />
-                  Course Management
-                </h1>
+                {/* Tab Navigation */}
+                <div className="flex items-center gap-8 mb-4">
+                  <button
+                    onClick={() => setActiveTab('management')}
+                    className={`text-2xl font-semibold flex items-center gap-3 transition-all ${
+                      activeTab === 'management' 
+                        ? 'text-white border-b-2 border-white pb-2' 
+                        : 'text-white/70 hover:text-white/90'
+                    }`}
+                  >
+                    <FaBook className="text-2xl" />
+                    Course Management
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('assign')}
+                    className={`text-2xl font-semibold flex items-center gap-3 transition-all ${
+                      activeTab === 'assign' 
+                        ? 'text-white border-b-2 border-white pb-2' 
+                        : 'text-white/70 hover:text-white/90'
+                    }`}
+                  >
+                    <FaUsers className="text-2xl" />
+                    Assign Courses
+                  </button>
+                </div>
+                
                 <p className="text-lg opacity-90 font-light">
-                  Manage courses, credits, and curriculum details
+                  {activeTab === 'management' 
+                    ? 'Manage courses, credits, and curriculum details'
+                    : 'Assign teachers to courses based on department'
+                  }
                 </p>
               </div>
               
@@ -309,42 +479,44 @@ const CourseLoad = () => {
         </div>
 
         {/* Action Buttons */}
-        <div className="mb-6 flex flex-wrap gap-4">
-          <button
-            onClick={() => setShowAddForm(true)}
-            className="bg-slate-700 text-white px-6 py-3 rounded-lg font-medium hover:bg-slate-800 transition-colors flex items-center gap-2 shadow-sm"
-          >
-            <FaPlus />
-            Add New Course
-          </button>
-          
-          <label className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center gap-2 shadow-sm cursor-pointer">
-            <FaUpload />
-            Upload CSV
-            <input
-              type="file"
-              accept=".csv"
-              onChange={handleFileUpload}
-              className="hidden"
-            />
-          </label>
-          
-          <button
-            onClick={handleExport}
-            className="bg-emerald-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-emerald-700 transition-colors flex items-center gap-2 shadow-sm"
-          >
-            <FaDownload />
-            Export CSV
-          </button>
-          
-          <button
-            onClick={handleDownloadTemplate}
-            className="bg-indigo-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-indigo-700 transition-colors flex items-center gap-2 shadow-sm"
-          >
-            <FaFileExport />
-            Download Template
-          </button>
-        </div>
+        {activeTab === 'management' && (
+          <div className="mb-6 flex flex-wrap gap-4">
+            <button
+              onClick={() => setShowAddForm(true)}
+              className="bg-slate-700 text-white px-6 py-3 rounded-lg font-medium hover:bg-slate-800 transition-colors flex items-center gap-2 shadow-sm"
+            >
+              <FaPlus />
+              Add New Course
+            </button>
+            
+            <label className="bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center gap-2 shadow-sm cursor-pointer">
+              <FaUpload />
+              Upload CSV
+              <input
+                type="file"
+                accept=".csv"
+                onChange={handleFileUpload}
+                className="hidden"
+              />
+            </label>
+            
+            <button
+              onClick={handleExport}
+              className="bg-emerald-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-emerald-700 transition-colors flex items-center gap-2 shadow-sm"
+            >
+              <FaDownload />
+              Export CSV
+            </button>
+            
+            <button
+              onClick={handleDownloadTemplate}
+              className="bg-indigo-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-indigo-700 transition-colors flex items-center gap-2 shadow-sm"
+            >
+              <FaFileExport />
+              Download Template
+            </button>
+          </div>
+        )}
 
         {/* Success/Error Messages */}
         {success && (
@@ -362,32 +534,34 @@ const CourseLoad = () => {
         )}
 
         {/* Search and Filter */}
-        <div className="mb-6 flex flex-wrap gap-4">
-          <div className="relative">
-            <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search courses..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent outline-none w-64"
-            />
+        {activeTab === 'management' && (
+          <div className="mb-6 flex flex-wrap gap-4">
+            <div className="relative">
+              <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search courses..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent outline-none w-64"
+              />
+            </div>
+            
+            <select
+              value={filterDepartment}
+              onChange={(e) => setFilterDepartment(e.target.value)}
+              className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent outline-none"
+            >
+              <option value="">All Departments</option>
+              {[...new Set(courses.map(course => course.department).filter(Boolean))].map(dept => (
+                <option key={dept} value={dept}>{dept}</option>
+              ))}
+            </select>
           </div>
-          
-          <select
-            value={filterDepartment}
-            onChange={(e) => setFilterDepartment(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent outline-none"
-          >
-            <option value="">All Departments</option>
-            {[...new Set(courses.map(course => course.department).filter(Boolean))].map(dept => (
-              <option key={dept} value={dept}>{dept}</option>
-            ))}
-          </select>
-        </div>
+        )}
 
         {/* Course Form Modal */}
-        {showAddForm && (
+        {activeTab === 'management' && showAddForm && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl p-8 max-w-4xl w-full max-h-[90vh] overflow-y-auto mx-4">
               <div className="flex justify-between items-center mb-6">
@@ -597,7 +771,8 @@ const CourseLoad = () => {
         )}
 
         {/* Courses Table */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        {activeTab === 'management' && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
           <div className="p-6 border-b border-gray-200">
             <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
               <FaBook className="text-slate-600" />
@@ -749,6 +924,180 @@ const CourseLoad = () => {
             </div>
           )}
         </div>
+        )}
+
+        {/* Course Assignment View */}
+        {activeTab === 'assign' && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <div className="p-6 border-b border-gray-200">
+              <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
+                <FaUsers className="text-slate-600" />
+                Course Assignment
+              </h2>
+              <p className="text-gray-600 mt-2">Assign teachers to courses based on department</p>
+            </div>
+
+            {loading ? (
+              <div className="p-8 text-center">
+                <FaSpinner className="animate-spin text-4xl text-gray-400 mx-auto mb-4" />
+                <p className="text-gray-600">Loading courses...</p>
+              </div>
+            ) : loadingTeachers ? (
+              <div className="p-8 text-center">
+                <FaSpinner className="animate-spin text-4xl text-gray-400 mx-auto mb-4" />
+                <p className="text-gray-600">Loading teachers...</p>
+              </div>
+            ) : courses.length === 0 ? (
+              <div className="p-8 text-center">
+                <FaBook className="text-4xl text-gray-400 mx-auto mb-4" />
+                <p className="text-gray-600">No courses found. Please add courses first!</p>
+              </div>
+            ) : (
+              <div className="p-6">
+                {/* Department Filter for Assignment */}
+                <div className="mb-6">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Filter by Department
+                  </label>
+                  <select
+                    value={filterDepartment}
+                    onChange={(e) => setFilterDepartment(e.target.value)}
+                    className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent outline-none"
+                  >
+                    <option value="">All Departments</option>
+                    {[...new Set(courses.map(course => course.department).filter(Boolean))].map(dept => (
+                      <option key={dept} value={dept}>{dept}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Course Assignment Cards */}
+                <div className="space-y-6">
+                  {courses
+                    .filter(course => filterDepartment === '' || course.department === filterDepartment)
+                    .map((course) => {
+                      const departmentTeachers = teachersByDepartment[course.department] || [];
+                      const courseSelectedTeachers = selectedTeachers[course.id] || [];
+                      
+                      return (
+                        <div key={course.id} className="border border-gray-200 rounded-lg p-6">
+                          {/* Course Header */}
+                          <div className="flex items-center justify-between mb-4">
+                            <div>
+                              <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                                <FaBook className="text-slate-600" />
+                                {course.name}
+                              </h3>
+                              <div className="flex items-center gap-4 text-sm text-gray-600 mt-1">
+                                <span className="font-mono">{course.code}</span>
+                                <span className="flex items-center gap-1">
+                                  <FaBuilding className="text-xs" />
+                                  {course.department}
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <FiAward className="text-xs" />
+                                  {course.credits} Credits
+                                </span>
+                                <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                                  course.type === 'Theory' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'
+                                }`}>
+                                  {course.type}
+                                </span>
+                              </div>
+                            </div>
+                            
+                            {/* Save Button */}
+                            <button
+                              onClick={() => saveTeacherAssignments(course.id)}
+                              disabled={courseSelectedTeachers.length === 0}
+                              className={`px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition-colors ${
+                                courseSelectedTeachers.length > 0
+                                  ? 'bg-slate-700 text-white hover:bg-slate-800'
+                                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                              }`}
+                            >
+                              <FaSave />
+                              Save Assignment
+                            </button>
+                          </div>
+
+                          {/* Teacher Assignment Section */}
+                          <div className="bg-gray-50 rounded-lg p-4">
+                            <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
+                              <FaUsers className="text-gray-500" />
+                              Teachers from {course.department} Department
+                            </h4>
+                            
+                            {/* Teacher Selection Tabs */}
+                            <div className="flex flex-wrap gap-2 mb-4">
+                              {departmentTeachers.length > 0 ? (
+                                departmentTeachers.map((teacher) => {
+                                  const isSelected = courseSelectedTeachers.includes(teacher.id);
+                                  return (
+                                    <button
+                                      key={teacher.id}
+                                      onClick={() => handleTeacherSelection(course.id, teacher.id, !isSelected)}
+                                      className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                                        isSelected
+                                          ? 'bg-slate-700 text-white'
+                                          : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+                                      }`}
+                                    >
+                                      {teacher.name}
+                                      {teacher.designation && (
+                                        <span className="text-xs opacity-80 ml-1">({teacher.designation})</span>
+                                      )}
+                                    </button>
+                                  );
+                                })
+                              ) : (
+                                <div className="text-sm text-gray-500 italic p-2">
+                                  No teachers found for {course.department} department
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Currently Assigned Teachers */}
+                            <div className="mt-4">
+                              <h5 className="text-sm font-medium text-gray-700 mb-2">Currently Assigned:</h5>
+                              <div className="flex flex-wrap gap-2">
+                                {course.assignedTeachers && course.assignedTeachers.length > 0 ? (
+                                  course.assignedTeachers.map((teacher, index) => (
+                                    <span key={index} className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm">
+                                      {teacher}
+                                    </span>
+                                  ))
+                                ) : (
+                                  <span className="text-gray-400 italic text-sm">No teachers assigned</span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Selected Teachers (before saving) */}
+                            {courseSelectedTeachers.length > 0 && (
+                              <div className="mt-4">
+                                <h5 className="text-sm font-medium text-gray-700 mb-2">Selected (unsaved):</h5>
+                                <div className="flex flex-wrap gap-2">
+                                  {courseSelectedTeachers.map((teacherId) => {
+                                    const teacher = departmentTeachers.find(t => t.id === teacherId);
+                                    return teacher ? (
+                                      <span key={teacherId} className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm">
+                                        {teacher.name}
+                                      </span>
+                                    ) : null;
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
