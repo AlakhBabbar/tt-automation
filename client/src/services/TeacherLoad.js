@@ -256,8 +256,7 @@ export const getTeachersByDepartment = async (department) => {
     const teachersRef = collection(db, COLLECTION_NAME);
     const q = query(
       teachersRef, 
-      where('department', '==', department),
-      orderBy('name')
+      where('department', '==', department)
     );
     const querySnapshot = await getDocs(q);
 
@@ -268,6 +267,9 @@ export const getTeachersByDepartment = async (department) => {
         ...doc.data()
       });
     });
+
+    // Sort by name in JavaScript instead of Firestore
+    teachers.sort((a, b) => a.name.localeCompare(b.name));
 
     return {
       success: true,

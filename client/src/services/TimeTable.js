@@ -47,6 +47,7 @@ export const createEmptyTimetable = () => {
     semester: '',
     type: '', // full-time or part-time
     batch: '',
+    overallCredits: '', // Added overall credits field
     createdAt: null,
     updatedAt: null
   };
@@ -80,6 +81,14 @@ export const validateTimetableData = (timetableData) => {
   // Validate type values
   if (timetableData.type && !['full-time', 'part-time'].includes(timetableData.type)) {
     errors.push('Type must be either full-time or part-time');
+  }
+
+  // Validate overall credits if provided
+  if (timetableData.overallCredits && timetableData.overallCredits.trim() !== '') {
+    const credits = parseFloat(timetableData.overallCredits);
+    if (isNaN(credits) || credits <= 0) {
+      errors.push('Overall credits must be a positive number');
+    }
   }
 
   return {
