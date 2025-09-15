@@ -5,6 +5,9 @@ from firebase_admin import initialize_app
 from openai import OpenAI
 import json
 
+# Import AI timetable service
+from ai_timetable_service import generate_timetable_with_openai, validate_timetable_data
+
 set_global_options(max_instances=10)
 initialize_app()
 
@@ -45,6 +48,134 @@ def _cors_headers(origin: str):
         "Access-Control-Allow-Headers": "Content-Type, Authorization",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
     }
+
+@https_fn.on_request(secrets=[OPENAI_API_KEY])
+def generate_timetable_ai(req: https_fn.Request) -> https_fn.Response:
+    """
+    AI Timetable Generation Endpoint
+    Receives comprehensive timetable data and generates timetables using OpenAI
+    """
+    # CORS preflight
+    if req.method == "OPTIONS":
+        return https_fn.Response("", status=204, headers=_cors_headers(req.headers.get("Origin", "*")))
+
+    if req.method != "POST":
+        return https_fn.Response("Method Not Allowed", status=405, headers=_cors_headers(req.headers.get("Origin", "*")))
+
+    try:
+        print("🤖 AI Timetable Generation Request Received")
+        
+        # Parse request body
+        body = req.get_json(silent=True) or {}
+        
+        # Extract data components
+        class_requests = body.get("classRequests", [])
+        existing_timetables = body.get("existingTimetables", [])
+        courses = body.get("courses", [])
+        teachers = body.get("teachers", [])
+        rooms = body.get("rooms", [])
+        settings = body.get("settings", {})
+        
+        print(f"📊 Received data summary:")
+        print(f"   - Class requests: {len(class_requests)}")
+        print(f"   - Existing timetables: {len(existing_timetables)}")
+        print(f"   - Courses: {len(courses)}")
+        print(f"   - Teachers: {len(teachers)}")
+        print(f"   - Rooms: {len(rooms)}")
+        print(f"   - Settings: {settings}")
+        
+        # Validate required data
+        if not class_requests:
+            return https_fn.Response(
+                json.dumps({"error": "No class requests provided"}), 
+                status=400, 
+                headers=_cors_headers(req.headers.get("Origin", "*"))
+            )
+        
+        # Validate OpenAI API key
+        if not OPENAI_API_KEY.value:
+            print("❌ OpenAI API key not configured")
+            return https_fn.Response(
+                json.dumps({"error": "OpenAI API key not configured"}), 
+                status=500, 
+                headers=_cors_headers(req.headers.get("Origin", "*"))
+            )
+        
+        print("🚀 Starting AI timetable generation...")
+        
+        # Generate timetable using OpenAI
+        ai_result = generate_timetable_with_openai(
+            OPENAI_API_KEY.value,
+            class_requests,
+            courses,
+            teachers,
+            rooms,
+            existing_timetables
+        )
+        
+        if not ai_result["success"]:
+            print(f"❌ AI generation failed: {ai_result.get('error')}")
+            return https_fn.Response(
+                json.dumps({
+                    "error": f"AI generation failed: {ai_result.get('error')}",
+                    "details": ai_result
+                }), 
+                status=500, 
+                headers=_cors_headers(req.headers.get("Origin", "*"))
+            )
+        
+        print("✅ AI generation successful, validating results...")
+        
+        # Validate generated timetables
+        validation = validate_timetable_data(ai_result["timetables"])
+        
+        # Prepare response
+        response_payload = {
+            "success": True,
+            "message": "AI timetable generation completed successfully",
+            "data": {
+                "requestId": settings.get("requestId", "unknown"),
+                "processedAt": settings.get("generatedAt"),
+                "timetables": ai_result["timetables"],
+                "validation": validation,
+                "ai_usage": ai_result.get("usage", {}),
+                "summary": {
+                    "classRequestsProcessed": len(class_requests),
+                    "timetablesGenerated": len(ai_result["timetables"]),
+                    "validationPassed": validation["valid"],
+                    "conflictsFound": len(validation["conflicts"]),
+                    "aiTokensUsed": ai_result.get("usage", {}).get("total_tokens", 0)
+                }
+            }
+        }
+        
+        headers = _cors_headers(req.headers.get("Origin", "*"))
+        headers["Content-Type"] = "application/json"
+        
+        print("✅ Sending AI-generated timetables to frontend")
+        print(f"📊 Generated {len(ai_result['timetables'])} timetables")
+        
+        return https_fn.Response(json.dumps(response_payload), status=200, headers=headers)
+        
+    except Exception as e:
+        print(f"❌ Error in AI timetable generation: {str(e)}")
+        headers = _cors_headers(req.headers.get("Origin", "*"))
+        headers["Content-Type"] = "application/json"
+        return https_fn.Response(
+            json.dumps({"error": f"AI generation failed: {str(e)}"}), 
+            status=500, 
+            headers=headers
+        )
+
+
+def prepare_ai_context(class_requests, existing_timetables, courses, teachers, rooms, settings):
+    """
+    Prepare comprehensive context for AI timetable generation
+    DEPRECATED: Logic moved to ai_timetable_service.py
+    """
+    print("⚠️ Using deprecated prepare_ai_context function")
+    return {"deprecated": True}
+
 
 @https_fn.on_request(secrets=[OPENAI_API_KEY])
 def chat(req: https_fn.Request) -> https_fn.Response:

@@ -13,4 +13,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, "tt-automation");
 
+// API Base URL for backend functions
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001/tt-automation-bb2a6/us-central1';
+
 export default app;

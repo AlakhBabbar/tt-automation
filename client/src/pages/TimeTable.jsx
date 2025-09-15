@@ -15,7 +15,9 @@ import {
   FaSpinner,
   FaCheckCircle,
   FaLock,
-  FaChevronDown
+  FaChevronDown,
+  FaRobot,
+  FaMagic
 } from 'react-icons/fa';
 import { 
   FiSave,
@@ -49,6 +51,16 @@ import {
   resolveConflicts,
   isValidTimetableForConflictCheck
 } from '../services/Conflicts';
+
+// Import AI service functions
+import {
+  generateTimetableWithAI,
+  prepareAIRequestData,
+  validateClassRequests
+} from '../services/AIService';
+
+// Import API configuration
+import { API_BASE_URL } from '../firebase/firebaseConfig';
 
 const TimeTable = () => {
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -101,6 +113,15 @@ const TimeTable = () => {
 
   // Timetable browser modal
   const [showTimetableModal, setShowTimetableModal] = useState(false);
+
+  // AI Generation modal
+  const [showAIModal, setShowAIModal] = useState(false);
+  const [aiClassRequests, setAiClassRequests] = useState([
+    { id: 1, program: '', branch: '', semester: '', batch: '', type: '', credits: '' }
+  ]);
+  const [includeExistingTimetables, setIncludeExistingTimetables] = useState(false);
+  const [selectedExistingTimetables, setSelectedExistingTimetables] = useState([]);
+  const [aiGenerating, setAiGenerating] = useState(false);
 
   // Temporary data storage for unsaved changes
   const [tempTimetableData, setTempTimetableData] = useState({});
@@ -208,16 +229,7 @@ const TimeTable = () => {
   const getActiveTab = () => tabs.find(tab => tab.id === activeTabId);
 
   const isTimetableUnlocked = (tab) => {
-    console.log('Checking unlock status for tab:', tab); // Debug log
     const isUnlocked = tab && tab.program && tab.branch && tab.semester && tab.type;
-    console.log('Is unlocked:', isUnlocked, {
-      hasTab: !!tab,
-      program: tab?.program,
-      branch: tab?.branch,
-      semester: tab?.semester,
-      type: tab?.type,
-      batch: tab?.batch
-    }); // Debug log
     return isUnlocked;
   };
 
@@ -336,6 +348,143 @@ const TimeTable = () => {
     const tab = tabs.find(t => t.id === tabId);
     if (tab && currentTimetable) {
       checkTabConflicts(tabId);
+    }
+  };
+
+  // AI Generation Helper Functions
+  const updateClassRequest = (index, field, value) => {
+    const updatedRequests = [...aiClassRequests];
+    updatedRequests[index] = { ...updatedRequests[index], [field]: value };
+    setAiClassRequests(updatedRequests);
+  };
+
+  const addClassRequest = () => {
+    setAiClassRequests([...aiClassRequests, {
+      program: '',
+      branch: '',
+      semester: '',
+      batch: '',
+      type: '',
+      credits: ''
+    }]);
+  };
+
+  const removeClassRequest = (index) => {
+    if (aiClassRequests.length > 1) {
+      const updatedRequests = aiClassRequests.filter((_, i) => i !== index);
+      setAiClassRequests(updatedRequests);
+    }
+  };
+
+  const handleGenerateWithAI = async () => {
+    // Close modal immediately when button is pressed
+    setShowAIModal(false);
+    
+    setAiGenerating(true);
+    setError(''); // Clear any previous errors
+    
+    try {
+      console.log('🚀 Starting AI timetable generation...');
+      console.log('🔗 Backend URL being used:', API_BASE_URL);
+      
+      // Test backend connection first
+      try {
+        console.log('🔍 Testing backend connection...');
+        const testResponse = await fetch(`${API_BASE_URL}/on_request_example`);
+        console.log('📡 Test response status:', testResponse.status);
+        if (testResponse.ok) {
+          const testText = await testResponse.text();
+          console.log('✅ Backend is running:', testText);
+          setSuccess('✅ Backend connection successful!');
+        } else {
+          console.error('❌ Backend test failed with status:', testResponse.status);
+          setError(`Backend not responding (status: ${testResponse.status})`);
+          return;
+        }
+      } catch (testError) {
+        console.error('❌ Backend connection test failed:', testError);
+        setError(`Cannot connect to backend: ${testError.message}. Make sure Firebase Functions emulator is running.`);
+        return;
+      }
+      
+      // Step 1: Validate user input
+      const validation = validateClassRequests(aiClassRequests);
+      if (!validation.isValid) {
+        setError(`Validation failed: ${validation.errors.join(', ')}`);
+        return;
+      }
+
+      console.log('📊 Gathering data for AI generation...');
+      
+      // Step 2: Prepare complete data package
+      const requestData = prepareAIRequestData(
+        aiClassRequests,
+        selectedExistingTimetables,
+        timetables,
+        courses,
+        teachers,
+        rooms
+      );
+
+      console.log(`✅ Data prepared - Classes: ${requestData.classRequests.length}, Teachers: ${requestData.teachers.length}, Rooms: ${requestData.rooms.length}`);
+
+      // Step 3: Show connection attempt
+      setSuccess('🌐 Connecting to AI service...');
+      
+      // Step 4: Send to backend AI service
+      console.log('🌐 Sending request to backend...');
+      const result = await generateTimetableWithAI(requestData);
+      
+      if (result.success) {
+        console.log('✅ AI generation successful');
+        
+        // Check if we got actual timetables
+        if (result.data.timetables && result.data.timetables.length > 0) {
+          console.log(`🎓 AI generated ${result.data.timetables.length} timetable(s)`);
+          
+          const conflictsCount = result.data.validation?.conflicts?.length || 0;
+          const validationStatus = result.data.validation?.valid ? '✅ Valid' : '⚠️ Has conflicts';
+          
+          setSuccess(
+            `🎉 AI Generated ${result.data.timetables.length} timetable(s) successfully! ` +
+            `${validationStatus} (${conflictsCount} conflicts found).`
+          );
+          
+          if (conflictsCount > 0) {
+            console.warn(`⚠️ ${conflictsCount} conflicts found in generated timetables`);
+          }
+          
+        } else {
+          setSuccess(`✅ Backend connected successfully! ${result.data.message}`);
+        }
+        
+        // Show success message for a bit longer
+        setTimeout(() => {
+          setSuccess('🤖 AI timetable generation completed!');
+        }, 3000);
+        
+      } else {
+        console.error('❌ AI generation failed:', result.error);
+        
+        // Check if it's a connection error
+        if (result.error.includes('fetch') || result.error.includes('network') || result.error.includes('connection')) {
+          setError(`🔌 Backend connection failed: ${result.error}. Please ensure the Firebase Functions emulator is running on port 5001.`);
+        } else {
+          setError(`AI generation failed: ${result.error}`);
+        }
+      }
+      
+    } catch (error) {
+      console.error('💥 Unexpected error in AI generation:', error);
+      
+      // Provide specific error messages based on error type
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        setError('🔌 Cannot connect to backend. Please start the Firebase Functions emulator first:\n1. Open terminal\n2. cd backend-cloud/functions\n3. firebase emulators:start --only functions');
+      } else {
+        setError(`Unexpected error: ${error.message}`);
+      }
+    } finally {
+      setAiGenerating(false);
     }
   };
 
@@ -670,7 +819,6 @@ const TimeTable = () => {
     
     const dayKey = day.toLowerCase();
     const data = currentTimetable[dayKey]?.[timeSlot] || { course: '', teacher: '', room: '' };
-    console.log('getTimeSlotData:', day, timeSlot, data); // Debug log
     return data;
   };
 
@@ -747,14 +895,24 @@ const TimeTable = () => {
               Create and manage multiple timetables simultaneously with intelligent conflict detection
             </p>
             
-            {/* Fullscreen Toggle */}
-            <button
-              onClick={() => setIsFullscreen(!isFullscreen)}
-              className="absolute top-4 right-4 p-2 bg-white/20 rounded-lg hover:bg-white/30 transition-colors"
-              title="Toggle Fullscreen"
-            >
-              <FaExpand className="text-lg" />
-            </button>
+            {/* Action Buttons */}
+            <div className="absolute top-4 right-4 flex gap-2">
+              <button
+                onClick={() => setShowAIModal(true)}
+                className="px-4 py-2 bg-green-500 hover:bg-green-600 rounded-lg transition-colors flex items-center gap-2 text-sm font-medium"
+                title="Generate timetable using AI"
+              >
+                <FaRobot className="text-sm" />
+                Generate with AI
+              </button>
+              <button
+                onClick={() => setIsFullscreen(!isFullscreen)}
+                className="p-2 bg-white/20 rounded-lg hover:bg-white/30 transition-colors"
+                title="Toggle Fullscreen"
+              >
+                <FaExpand className="text-lg" />
+              </button>
+            </div>
           </div>
         </div>
         )}
@@ -766,13 +924,23 @@ const TimeTable = () => {
             <FaCalendarAlt />
             Timetable Creation Studio
           </h1>
-          <button
-            onClick={() => setIsFullscreen(false)}
-            className="p-2 bg-white/20 rounded-lg hover:bg-white/30 transition-colors"
-            title="Exit Fullscreen"
-          >
-            <FaCompress className="text-lg" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowAIModal(true)}
+              className="px-3 py-2 bg-green-500 hover:bg-green-600 rounded-lg transition-colors flex items-center gap-2 text-sm font-medium"
+              title="Generate timetable using AI"
+            >
+              <FaRobot className="text-sm" />
+              Generate with AI
+            </button>
+            <button
+              onClick={() => setIsFullscreen(false)}
+              className="p-2 bg-white/20 rounded-lg hover:bg-white/30 transition-colors"
+              title="Exit Fullscreen"
+            >
+              <FaCompress className="text-lg" />
+            </button>
+          </div>
         </div>
         )}
 
@@ -1136,7 +1304,6 @@ const TimeTable = () => {
                 if (!activeTab) return null;
                 
                 const tabConflictsForTab = tabConflicts[activeTab.id] || {};
-                console.log('Conflicts display: activeTab', activeTab.id, 'conflicts', tabConflictsForTab);
                 const allConflicts = [];
                 
                 // Collect all conflicts from the current tab
@@ -1157,8 +1324,6 @@ const TimeTable = () => {
                     });
                   }
                 });
-                
-                console.log('Conflicts display: allConflicts', allConflicts);
                 
                 if (allConflicts.length === 0) {
                   return (
@@ -1286,6 +1451,192 @@ const TimeTable = () => {
               >
                 Close
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI Generation Modal */}
+      {showAIModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto m-4 shadow-2xl">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                <FaRobot className="text-indigo-600" />
+                Generate Timetable with AI
+              </h2>
+              <button
+                onClick={() => setShowAIModal(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <FaTimes className="text-gray-600" />
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              {/* Class Requests */}
+              <div>
+                <h3 className="text-lg font-semibold text-gray-700 mb-3">Class/Course Definitions</h3>
+                <p className="text-sm text-gray-600 mb-4">Define the classes/courses for which you want to generate timetables:</p>
+                
+                {/* Header Row */}
+                <div className="grid grid-cols-7 gap-2 mb-2 text-sm font-semibold text-gray-600 px-2">
+                  <span>Program</span>
+                  <span>Branch</span>
+                  <span>Semester</span>
+                  <span>Batch</span>
+                  <span>Type</span>
+                  <span>Credits</span>
+                  <span>Action</span>
+                </div>
+
+                {/* Class Request Rows */}
+                {aiClassRequests.map((request, index) => (
+                  <div key={index} className="grid grid-cols-7 gap-2 mb-2 p-2 bg-gray-50 rounded-lg">
+                    <input
+                      type="text"
+                      placeholder="BCA"
+                      value={request.program}
+                      onChange={(e) => updateClassRequest(index, 'program', e.target.value)}
+                      className="px-2 py-1 border rounded text-sm"
+                    />
+                    <input
+                      type="text"
+                      placeholder="CS"
+                      value={request.branch}
+                      onChange={(e) => updateClassRequest(index, 'branch', e.target.value)}
+                      className="px-2 py-1 border rounded text-sm"
+                    />
+                    <input
+                      type="text"
+                      placeholder="1"
+                      value={request.semester}
+                      onChange={(e) => updateClassRequest(index, 'semester', e.target.value)}
+                      className="px-2 py-1 border rounded text-sm"
+                    />
+                    <input
+                      type="text"
+                      placeholder="A"
+                      value={request.batch}
+                      onChange={(e) => updateClassRequest(index, 'batch', e.target.value)}
+                      className="px-2 py-1 border rounded text-sm"
+                    />
+                    <select
+                      value={request.type}
+                      onChange={(e) => updateClassRequest(index, 'type', e.target.value)}
+                      className="px-2 py-1 border rounded text-sm"
+                    >
+                      <option value="">Select</option>
+                      <option value="full-time">Full Time</option>
+                      <option value="part-time">Part Time</option>
+                    </select>
+                    <input
+                      type="number"
+                      placeholder="120"
+                      value={request.credits}
+                      onChange={(e) => updateClassRequest(index, 'credits', e.target.value)}
+                      className="px-2 py-1 border rounded text-sm"
+                      min="1"
+                      max="200"
+                    />
+                    <button
+                      onClick={() => removeClassRequest(index)}
+                      className="px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600 transition-colors text-sm"
+                      disabled={aiClassRequests.length === 1}
+                    >
+                      <FaTimes />
+                    </button>
+                  </div>
+                ))}
+
+                {/* Add Row Button */}
+                <button
+                  onClick={addClassRequest}
+                  className="mt-2 px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors text-sm flex items-center gap-2"
+                >
+                  <FaPlus />
+                  Add Another Class
+                </button>
+              </div>
+
+              {/* Existing Timetables Option */}
+              <div className="border-t pt-4">
+                <div className="flex items-center gap-3 mb-3">
+                  <input
+                    type="checkbox"
+                    id="includeExisting"
+                    checked={includeExistingTimetables}
+                    onChange={(e) => setIncludeExistingTimetables(e.target.checked)}
+                    className="rounded"
+                  />
+                  <label htmlFor="includeExisting" className="text-sm font-medium text-gray-700">
+                    Include existing timetables in generation
+                  </label>
+                </div>
+
+                {includeExistingTimetables && (
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <p className="text-sm text-gray-600 mb-3">
+                      Select existing timetables to include (AI will avoid conflicts):
+                    </p>
+                    <div className="space-y-2 max-h-40 overflow-y-auto">
+                      {timetables.length === 0 ? (
+                        <p className="text-sm text-gray-500 italic">No existing timetables found</p>
+                      ) : (
+                        timetables.map((timetable) => (
+                          <div key={timetable.id} className="flex items-start gap-2 p-2 bg-white rounded border">
+                            <input 
+                              type="checkbox" 
+                              id={`existing-${timetable.id}`}
+                              checked={selectedExistingTimetables.includes(timetable.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedExistingTimetables([...selectedExistingTimetables, timetable.id]);
+                                } else {
+                                  setSelectedExistingTimetables(selectedExistingTimetables.filter(id => id !== timetable.id));
+                                }
+                              }}
+                              className="rounded mt-1" 
+                            />
+                            <label htmlFor={`existing-${timetable.id}`} className="text-sm flex-1 cursor-pointer">
+                              <div className="font-medium text-gray-800">
+                                {timetable.program} - {timetable.branch}
+                              </div>
+                              <div className="text-xs text-gray-600 flex items-center gap-2">
+                                <span>📚 Semester {timetable.semester}</span>
+                                <span>⏰ {timetable.type}</span>
+                                {timetable.batch && <span>👥 Batch {timetable.batch}</span>}
+                              </div>
+                              {timetable.createdAt && (
+                                <div className="text-xs text-gray-400 mt-1">
+                                  Created: {new Date(timetable.createdAt.seconds * 1000).toLocaleDateString()}
+                                </div>
+                              )}
+                            </label>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex justify-end gap-3 pt-4 border-t">
+                <button
+                  onClick={() => setShowAIModal(false)}
+                  className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleGenerateWithAI}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2"
+                >
+                  <FaRobot />
+                  Generate Timetable
+                </button>
+              </div>
             </div>
           </div>
         </div>
