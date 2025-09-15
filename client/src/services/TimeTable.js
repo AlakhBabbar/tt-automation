@@ -59,7 +59,8 @@ export const createEmptyTimetable = () => {
       timetable[day][slot] = {
         course: '',
         teacher: '',
-        room: ''
+        room: '',
+        conflicts: [] // Will store array of conflict information when detected
       };
     });
   });
@@ -122,6 +123,44 @@ export const getAllTimetables = async () => {
       success: false,
       error: error.message
     };
+  }
+};
+
+// Debug function to check timetable data integrity
+export const debugTimetableIntegrity = async () => {
+  try {
+    const result = await getAllTimetables();
+    if (!result.success) {
+      console.error('Failed to fetch timetables for debugging');
+      return;
+    }
+
+    console.log('=== TIMETABLE INTEGRITY DEBUG ===');
+    result.data.forEach((timetable, index) => {
+      console.log(`Timetable ${index + 1} (${timetable.id}):`);
+      console.log(`  Program: "${timetable.program}" (${typeof timetable.program})`);
+      console.log(`  Branch: "${timetable.branch}" (${typeof timetable.branch})`);
+      console.log(`  Semester: "${timetable.semester}" (${typeof timetable.semester})`);
+      console.log(`  Type: "${timetable.type}" (${typeof timetable.type})`);
+      console.log(`  Batch: "${timetable.batch}" (${typeof timetable.batch})`);
+      
+      // Check if any time slots have data
+      let hasSlotData = false;
+      WEEKDAYS.forEach(day => {
+        if (timetable[day]) {
+          TIME_SLOTS.forEach(slot => {
+            const slotData = timetable[day][slot];
+            if (slotData && (slotData.teacher || slotData.room || slotData.course)) {
+              hasSlotData = true;
+            }
+          });
+        }
+      });
+      console.log(`  Has slot data: ${hasSlotData}`);
+      console.log('---');
+    });
+  } catch (error) {
+    console.error('Error debugging timetable integrity:', error);
   }
 };
 
@@ -346,15 +385,6 @@ export const updateTimeSlot = async (timetableId, day, timeSlot, slotData) => {
       return currentTimetable;
     }
 
-    // Check for conflicts before updating
-    const conflicts = await checkTimeSlotConflicts(timetableId, day, timeSlot, slotData);
-    if (conflicts.length > 0) {
-      return {
-        success: false,
-        error: 'Conflicts detected: ' + conflicts.join(', ')
-      };
-    }
-
     // Update the specific time slot
     const updatePath = `${day}.${timeSlot}`;
     const timetableRef = doc(db, COLLECTION_NAME, timetableId);
@@ -488,117 +518,6 @@ export const getRooms = async () => {
       success: false,
       error: error.message
     };
-  }
-};
-
-// Check for conflicts when assigning time slots
-export const checkTimeSlotConflicts = async (timetableId, day, timeSlot, slotData) => {
-  try {
-    const conflicts = [];
-    const allTimetables = await getAllTimetables();
-    
-    if (!allTimetables.success) {
-      return [];
-    }
-
-    // Check all timetables for conflicts
-    for (const timetable of allTimetables.data) {
-      // Skip the current timetable being updated
-      if (timetable.id === timetableId) continue;
-      
-      const daySchedule = timetable[day];
-      if (!daySchedule || !daySchedule[timeSlot]) continue;
-      
-      const existingSlot = daySchedule[timeSlot];
-      
-      // Check teacher conflict
-      if (slotData.teacher && existingSlot.teacher === slotData.teacher) {
-        conflicts.push(`Teacher ${slotData.teacher} is already scheduled at ${timeSlot} on ${day}`);
-      }
-      
-      // Check room conflict
-      if (slotData.room && existingSlot.room === slotData.room) {
-        conflicts.push(`Room ${slotData.room} is already booked at ${timeSlot} on ${day}`);
-      }
-    }
-    
-    return conflicts;
-  } catch (error) {
-    console.error('Error checking conflicts:', error);
-    return [];
-  }
-};
-
-// Real-time conflict detection for temporary timetable data
-export const checkRealTimeConflicts = async (currentTimetables, day, timeSlot, slotData, excludeTabId) => {
-  try {
-    const conflicts = [];
-    
-    // Check against saved timetables
-    const allTimetables = await getAllTimetables();
-    if (allTimetables.success) {
-      for (const timetable of allTimetables.data) {
-        const daySchedule = timetable[day];
-        if (!daySchedule || !daySchedule[timeSlot]) continue;
-        
-        const existingSlot = daySchedule[timeSlot];
-        
-        // Check teacher conflict
-        if (slotData.teacher && existingSlot.teacher === slotData.teacher) {
-          conflicts.push({
-            type: 'teacher',
-            severity: 'high',
-            message: `Teacher "${slotData.teacher}" is already scheduled in ${timetable.program} ${timetable.branch} at ${timeSlot} on ${day}`,
-            conflictWith: `${timetable.program} ${timetable.branch} (${timetable.semester})`
-          });
-        }
-        
-        // Check room conflict
-        if (slotData.room && existingSlot.room === slotData.room) {
-          conflicts.push({
-            type: 'room',
-            severity: 'high',
-            message: `Room "${slotData.room}" is already booked for ${timetable.program} ${timetable.branch} at ${timeSlot} on ${day}`,
-            conflictWith: `${timetable.program} ${timetable.branch} (${timetable.semester})`
-          });
-        }
-      }
-    }
-    
-    // Check against other temporary timetables
-    Object.keys(currentTimetables).forEach(tabId => {
-      if (tabId === excludeTabId.toString()) return;
-      
-      const tempTimetable = currentTimetables[tabId];
-      if (!tempTimetable || !tempTimetable[day] || !tempTimetable[day][timeSlot]) return;
-      
-      const existingSlot = tempTimetable[day][timeSlot];
-      
-      // Check teacher conflict
-      if (slotData.teacher && existingSlot.teacher === slotData.teacher) {
-        conflicts.push({
-          type: 'teacher',
-          severity: 'medium',
-          message: `Teacher "${slotData.teacher}" is already assigned in another unsaved timetable at ${timeSlot} on ${day}`,
-          conflictWith: 'Another timetable tab'
-        });
-      }
-      
-      // Check room conflict
-      if (slotData.room && existingSlot.room === slotData.room) {
-        conflicts.push({
-          type: 'room',
-          severity: 'medium',
-          message: `Room "${slotData.room}" is already assigned in another unsaved timetable at ${timeSlot} on ${day}`,
-          conflictWith: 'Another timetable tab'
-        });
-      }
-    });
-    
-    return conflicts;
-  } catch (error) {
-    console.error('Error checking real-time conflicts:', error);
-    return [];
   }
 };
 

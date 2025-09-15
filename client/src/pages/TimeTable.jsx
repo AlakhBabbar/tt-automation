@@ -35,13 +35,20 @@ import {
   getCourses,
   getTeachers,
   getRooms,
-  checkTimeSlotConflicts,
-  checkRealTimeConflicts,
   getTimetableStatistics,
   TIME_SLOTS,
   WEEKDAYS,
-  createEmptyTimetable
+  createEmptyTimetable,
+  debugTimetableIntegrity
 } from '../services/TimeTable';
+
+// Import Conflict detection functions
+import {
+  embedConflictsInTimetable,
+  extractConflictsForDisplay,
+  resolveConflicts,
+  isValidTimetableForConflictCheck
+} from '../services/Conflicts';
 
 const TimeTable = () => {
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -59,6 +66,11 @@ const TimeTable = () => {
   const [courses, setCourses] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [rooms, setRooms] = useState([]);
+  
+  // Conflict management
+  const [tabConflicts, setTabConflicts] = useState({}); // tabId -> conflicts map
+  const [dismissedConflicts, setDismissedConflicts] = useState({}); // tabId -> set of dismissed conflict keys
+  const [showConflictTooltips, setShowConflictTooltips] = useState(true);
   
   // Tab management
   const [tabs, setTabs] = useState([
@@ -126,6 +138,13 @@ const TimeTable = () => {
           });
         }
       }
+      
+      // Check conflicts for the active tab after timetable is loaded
+      setTimeout(() => {
+        if (activeTab) {
+          checkTabConflicts(activeTab.id);
+        }
+      }, 100); // Small delay to ensure timetable is loaded
     }
   }, [activeTabId, timetables, tempTimetableData]);
 
@@ -154,6 +173,10 @@ const TimeTable = () => {
 
       if (timetablesResult.success) {
         setTimetables(timetablesResult.data);
+        
+        // Debug timetable integrity
+        console.log('=== DEBUGGING TIMETABLE DATA ===');
+        debugTimetableIntegrity();
       }
       
       if (coursesResult.success) {
@@ -196,6 +219,129 @@ const TimeTable = () => {
       batch: tab?.batch
     }); // Debug log
     return isUnlocked;
+  };
+
+  // Conflict management functions
+  const checkTabConflicts = async (tabId) => {
+    const tab = tabs.find(t => t.id === tabId);
+    if (!tab || !currentTimetable) {
+      console.log('checkTabConflicts: Missing tab or currentTimetable', { tab, currentTimetable });
+      return;
+    }
+
+    // Get unsaved timetables (from other tabs)
+    const unsavedTimetables = tabs
+      .filter(t => t.id !== tabId && t.timetableId === null)
+      .map(t => ({ 
+        ...tempTimetableData[t.id] || currentTimetable, 
+        id: `tab-${t.id}`, 
+        ...t 
+      }));
+
+    // Filter out incomplete timetables to prevent false conflicts
+    const validSavedTimetables = timetables.filter(isValidTimetableForConflictCheck);
+
+    // Filter out incomplete unsaved timetables
+    const validUnsavedTimetables = unsavedTimetables.filter(isValidTimetableForConflictCheck);
+
+    console.log('checkTabConflicts: Checking conflicts for tab', tabId, {
+      currentTimetable,
+      savedTimetables: timetables.length,
+      validSavedTimetables: validSavedTimetables.length,
+      unsavedTimetables: unsavedTimetables.length,
+      validUnsavedTimetables: validUnsavedTimetables.length
+    });
+
+    // Create the timetable to check with current tab data
+    const timetableToCheck = { ...currentTimetable, id: `tab-${tabId}`, ...tab };
+
+    // Only check conflicts if the current timetable has basic information
+    if (!isValidTimetableForConflictCheck(timetableToCheck)) {
+      console.log('checkTabConflicts: Current timetable incomplete, skipping conflict check');
+      setTabConflicts(prev => ({
+        ...prev,
+        [tabId]: {}
+      }));
+      return;
+    }
+
+    // Use the new embedded conflict approach
+    const timetableWithConflicts = embedConflictsInTimetable(
+      timetableToCheck,
+      validSavedTimetables, // filtered saved timetables
+      validUnsavedTimetables // filtered unsaved timetables
+    );
+
+    // Extract conflicts for display
+    const displayConflicts = extractConflictsForDisplay(timetableWithConflicts);
+
+    console.log('checkTabConflicts: Found conflicts', displayConflicts);
+
+    setTabConflicts(prev => ({
+      ...prev,
+      [tabId]: displayConflicts
+    }));
+  };
+
+  const getSlotConflicts = (day, timeSlot) => {
+    const activeTab = getActiveTab();
+    if (!activeTab) return [];
+
+    const tabConflictsForTab = tabConflicts[activeTab.id];
+    if (!tabConflictsForTab || !tabConflictsForTab[day] || !tabConflictsForTab[day][timeSlot]) {
+      return [];
+    }
+
+    return tabConflictsForTab[day][timeSlot];
+  };
+
+  const hasSlotConflicts = (day, timeSlot) => {
+    return getSlotConflicts(day, timeSlot).length > 0;
+  };
+
+  const getConflictKey = (conflict, day, timeSlot) => {
+    return `${day}-${timeSlot}-${conflict.type}-${conflict.program}-${conflict.branch}-${conflict.semester}`;
+  };
+
+  const isConflictDismissed = (conflict, day, timeSlot) => {
+    const activeTab = getActiveTab();
+    if (!activeTab) return false;
+
+    const dismissedForTab = dismissedConflicts[activeTab.id] || new Set();
+    const conflictKey = getConflictKey(conflict, day, timeSlot);
+    return dismissedForTab.has(conflictKey);
+  };
+
+  const dismissConflict = (conflict, day, timeSlot) => {
+    const activeTab = getActiveTab();
+    if (!activeTab) return;
+
+    const conflictKey = getConflictKey(conflict, day, timeSlot);
+    setDismissedConflicts(prev => {
+      const dismissedForTab = prev[activeTab.id] || new Set();
+      const newDismissedForTab = new Set(dismissedForTab);
+      newDismissedForTab.add(conflictKey);
+      
+      return {
+        ...prev,
+        [activeTab.id]: newDismissedForTab
+      };
+    });
+  };
+
+  const switchToTab = (tabId) => {
+    setActiveTabId(tabId);
+    
+    // Check conflicts for the newly active tab
+    const tab = tabs.find(t => t.id === tabId);
+    if (tab && currentTimetable) {
+      checkTabConflicts(tabId);
+    }
+  };
+
+  const getVisibleConflicts = (day, timeSlot) => {
+    const conflicts = getSlotConflicts(day, timeSlot);
+    return conflicts.filter(conflict => !isConflictDismissed(conflict, day, timeSlot));
   };
 
   const generateTabName = (program, branch, semester, type, batch) => {
@@ -263,6 +409,11 @@ const TimeTable = () => {
         setStats(statistics.data);
       }
     });
+    
+    // Check conflicts for the loaded timetable
+    setTimeout(() => {
+      checkTabConflicts(nextTabId);
+    }, 100); // Small delay to ensure tab is properly set up
   };
 
   const closeTab = async (tabId) => {
@@ -508,28 +659,9 @@ const TimeTable = () => {
     });
     setTabs(updatedTabs);
     
-    // Real-time conflict detection - check whenever teacher or room is assigned
+    // Real-time conflict detection using new conflict system
     if (updatedTimetable[dayKey][timeSlot].teacher || updatedTimetable[dayKey][timeSlot].room) {
-      const conflicts = await checkRealTimeConflicts(
-        tempTimetableData,
-        dayKey,
-        timeSlot,
-        updatedTimetable[dayKey][timeSlot],
-        activeTab.id
-      );
-      
-      const conflictKey = `${dayKey}-${timeSlot}`;
-      if (conflicts.length > 0) {
-        setConflicts(prev => [
-          ...prev.filter(c => c.key !== conflictKey),
-          ...conflicts.map(conflict => ({
-            key: conflictKey,
-            ...conflict
-          }))
-        ]);
-      } else {
-        setConflicts(prev => prev.filter(c => c.key !== conflictKey));
-      }
+      checkTabConflicts(activeTab.id);
     }
   };
 
@@ -678,7 +810,7 @@ const TimeTable = () => {
                           ? 'bg-white border-t border-l border-r border-slate-200 text-slate-700'
                           : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                       }`}
-                      onClick={() => setActiveTabId(tab.id)}
+                      onClick={() => switchToTab(tab.id)}
                     >
                       <span className="text-sm font-medium truncate max-w-32">{tab.name}</span>
                       {tabs.length > 1 && (
@@ -869,9 +1001,19 @@ const TimeTable = () => {
                         </td>
                         {days.map((day, dayIndex) => {
                           const slotData = getTimeSlotData(day, timeSlot);
+                          const hasConflict = hasSlotConflicts(day, timeSlot);
+                          const conflicts = getVisibleConflicts(day, timeSlot);
+                          
                           return (
-                            <td key={`${day}-${timeSlot}`} className="p-1 border-r border-slate-200 last:border-r-0">
-                              <div className="space-y-0.5">
+                            <td key={`${day}-${timeSlot}`} className={`p-1 border-r border-slate-200 last:border-r-0 relative ${
+                              hasConflict ? 'border-2 border-red-500 bg-red-50' : ''
+                            }`}>
+                              <div className="space-y-0.5"
+                                   title={hasConflict ? 
+                                     conflicts.map(c => c.message).join('; ') : 
+                                     ''
+                                   }
+                              >
                                 <select
                                   value={slotData.course}
                                   onChange={(e) => updateTimeSlotData(day, timeSlot, 'course', e.target.value)}
@@ -913,6 +1055,30 @@ const TimeTable = () => {
                                     <option key={room.id} value={room.name}>{room.name}</option>
                                   ))}
                                 </select>
+                                
+                                {/* Conflict Display */}
+                                {hasConflict && conflicts.length > 0 && (
+                                  <div className="mt-1">
+                                    {conflicts.map((conflict, index) => (
+                                      <div
+                                        key={index}
+                                        className="flex items-center justify-between bg-red-100 border border-red-300 rounded px-1 py-0.5 text-xs mb-0.5"
+                                        title={`${conflict.type} conflict with ${conflict.program}-${conflict.branch}-Sem${conflict.semester}`}
+                                      >
+                                        <span className="text-red-700 truncate text-xs">
+                                          {conflict.type === 'teacher' ? '👨‍🏫' : '🏫'} {conflict.type}
+                                        </span>
+                                        <button
+                                          onClick={() => dismissConflict(conflict, day, timeSlot)}
+                                          className="text-red-500 hover:text-red-700 ml-1 flex-shrink-0"
+                                          title="Dismiss this conflict warning"
+                                        >
+                                          ×
+                                        </button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
                             </td>
                           );
@@ -965,13 +1131,45 @@ const TimeTable = () => {
               </h4>
             
             <div className="p-2 space-y-2">
-              {conflicts.length === 0 ? (
-                <div className="text-center py-4">
-                  <FaCheck className="text-xl text-green-500 mx-auto mb-2" />
-                  <p className="text-xs text-slate-600">No conflicts detected</p>
-                </div>
-              ) : (
-                conflicts.map((conflict, index) => (
+              {(() => {
+                const activeTab = getActiveTab();
+                if (!activeTab) return null;
+                
+                const tabConflictsForTab = tabConflicts[activeTab.id] || {};
+                console.log('Conflicts display: activeTab', activeTab.id, 'conflicts', tabConflictsForTab);
+                const allConflicts = [];
+                
+                // Collect all conflicts from the current tab
+                WEEKDAYS.forEach(day => {
+                  if (tabConflictsForTab[day]) {
+                    TIME_SLOTS.forEach(timeSlot => {
+                      const slotConflicts = tabConflictsForTab[day][timeSlot] || [];
+                      slotConflicts.forEach(conflict => {
+                        if (!isConflictDismissed(conflict, day, timeSlot)) {
+                          allConflicts.push({
+                            ...conflict,
+                            day,
+                            timeSlot,
+                            location: `${day.charAt(0).toUpperCase() + day.slice(1)} ${timeSlot}`
+                          });
+                        }
+                      });
+                    });
+                  }
+                });
+                
+                console.log('Conflicts display: allConflicts', allConflicts);
+                
+                if (allConflicts.length === 0) {
+                  return (
+                    <div className="text-center py-4">
+                      <FaCheck className="text-xl text-green-500 mx-auto mb-2" />
+                      <p className="text-xs text-slate-600">No conflicts detected</p>
+                    </div>
+                  );
+                }
+                
+                return allConflicts.map((conflict, index) => (
                   <div
                     key={index}
                     className={`p-2 rounded-lg border-l-4 ${
@@ -987,9 +1185,8 @@ const TimeTable = () => {
                       <p className="text-xs">{conflict.message}</p>
                     </div>
                   </div>
-                ))
-              )}
-            </div>
+                ));
+              })()}
             </div>
 
             {/* Statistics */}
@@ -1018,6 +1215,7 @@ const TimeTable = () => {
             </div>
           </div>
         </div>
+      </div>
       </div>
 
       {/* Timetable Browser Modal */}

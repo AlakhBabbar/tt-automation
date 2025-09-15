@@ -13,12 +13,10 @@ import {
   FaExclamationTriangle,
   FaUsers,
   FaTimes,
-  FaSave,
-  FaClock
+  FaSave
 } from 'react-icons/fa';
 import { FiFileText, FiFilter, FiMapPin, FiHash, FiLayers } from 'react-icons/fi';
 import Menu from '../Components/Menu';
-import RoomAvailability from './RoomAvailability';
 import {
   getAllRooms,
   addRoom,
@@ -38,7 +36,6 @@ const RoomLoad = () => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingRoom, setEditingRoom] = useState(null);
   const [statistics, setStatistics] = useState(null);
-  const [activeTab, setActiveTab] = useState('management'); // 'management' or 'assign'
   
   // Search and filter states
   const [searchTerm, setSearchTerm] = useState('');
@@ -262,39 +259,14 @@ const RoomLoad = () => {
         {/* Header Section */}
         <div className="mb-8">
           <div className="bg-gradient-to-r from-slate-800 via-slate-700 to-slate-600 text-white p-8 rounded-xl shadow-sm border border-slate-200">
-            <div className="flex items-center justify-between">
-              <div>
-                {/* Tab Navigation */}
-                <div className="flex items-center gap-8 mb-4">
-                  <button
-                    onClick={() => setActiveTab('management')}
-                    className={`text-2xl font-semibold flex items-center gap-3 transition-all ${
-                      activeTab === 'management' 
-                        ? 'text-white border-b-2 border-white pb-2' 
-                        : 'text-white/70 hover:text-white/90'
-                    }`}
-                  >
-                    <FaBuilding className="text-2xl" />
-                    Room Management
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('assign')}
-                    className={`text-2xl font-semibold flex items-center gap-3 transition-all ${
-                      activeTab === 'assign' 
-                        ? 'text-white border-b-2 border-white pb-2' 
-                        : 'text-white/70 hover:text-white/90'
-                    }`}
-                  >
-                    <FaClock className="text-2xl" />
-                    Assign Availability
-                  </button>
-                </div>
-                
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between">
+              <div className="mb-4 lg:mb-0">
+                <h1 className="text-3xl font-semibold mb-2 flex items-center gap-3">
+                  <FaDoorOpen className="text-2xl" />
+                  Room Management
+                </h1>
                 <p className="text-lg opacity-90 font-light">
-                  {activeTab === 'management' 
-                    ? 'Manage room data, capacity, and facility details'
-                    : 'Assign time slot availability for rooms'
-                  }
+                  Manage room data, capacity, and facility details
                 </p>
               </div>
               
@@ -322,10 +294,7 @@ const RoomLoad = () => {
           </div>
         </div>
 
-        {/* Tab Content */}
-        {activeTab === 'management' && (
-          <>
-            {/* Success/Error Messages */}
+        {/* Success/Error Messages */}
         {(success || error) && (
           <div className={`mb-6 p-4 rounded-lg border ${success ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
             <div className="flex items-center gap-3">
@@ -634,13 +603,6 @@ const RoomLoad = () => {
             </div>
           )}
         </div>
-          </>
-        )}
-
-        {/* Assignment Tab - Room Availability */}
-        {activeTab === 'assign' && (
-          <RoomAvailability />
-        )}
       </div>
     </div>
   );
