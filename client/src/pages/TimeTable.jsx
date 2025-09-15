@@ -66,7 +66,7 @@ const TimeTable = () => {
       id: 1,
       name: 'New Timetable',
       timetableId: null,
-      course: '',
+      program: '',
       branch: '',
       semester: '',
       type: '',
@@ -186,10 +186,10 @@ const TimeTable = () => {
 
   const isTimetableUnlocked = (tab) => {
     console.log('Checking unlock status for tab:', tab); // Debug log
-    const isUnlocked = tab && tab.course && tab.branch && tab.semester && tab.type;
+    const isUnlocked = tab && tab.program && tab.branch && tab.semester && tab.type;
     console.log('Is unlocked:', isUnlocked, {
       hasTab: !!tab,
-      course: tab?.course,
+      program: tab?.program,
       branch: tab?.branch,
       semester: tab?.semester,
       type: tab?.type,
@@ -198,12 +198,12 @@ const TimeTable = () => {
     return isUnlocked;
   };
 
-  const generateTabName = (course, branch, semester, type, batch) => {
-    if (!course || !branch || !semester || !type) {
+  const generateTabName = (program, branch, semester, type, batch) => {
+    if (!program || !branch || !semester || !type) {
       return 'New Timetable';
     }
     const batchSuffix = batch ? `-${batch}` : '';
-    return `${course}-${branch}-Sem${semester}-${type === 'full-time' ? 'FT' : 'PT'}${batchSuffix}`;
+    return `${program}-${branch}-Sem${semester}-${type === 'full-time' ? 'FT' : 'PT'}${batchSuffix}`;
   };
 
   const addNewTab = () => {
@@ -211,7 +211,7 @@ const TimeTable = () => {
       id: nextTabId,
       name: `New Timetable ${nextTabId}`,
       timetableId: null,
-      course: '',
+      program: '',
       branch: '',
       semester: '',
       type: '',
@@ -239,9 +239,9 @@ const TimeTable = () => {
     // Create new tab for existing timetable
     const newTab = {
       id: nextTabId,
-      name: generateTabName(timetable.course, timetable.branch, timetable.semester, timetable.type, timetable.batch),
+      name: generateTabName(timetable.program, timetable.branch, timetable.semester, timetable.type, timetable.batch),
       timetableId: timetable.id,
-      course: timetable.course,
+      program: timetable.program,
       branch: timetable.branch,
       semester: timetable.semester,
       type: timetable.type,
@@ -295,7 +295,7 @@ const TimeTable = () => {
       if (tab.id === activeTabId) {
         const updatedTab = { ...tab, [field]: value, isModified: true };
         updatedTab.name = generateTabName(
-          updatedTab.course,
+          updatedTab.program,
           updatedTab.branch,
           updatedTab.semester,
           updatedTab.type,
@@ -309,7 +309,7 @@ const TimeTable = () => {
     
     // Check if we should auto-load an existing timetable
     const activeTab = updatedTabs.find(tab => tab.id === activeTabId);
-    if (activeTab && activeTab.course && activeTab.branch && activeTab.semester && activeTab.type) {
+    if (activeTab && activeTab.program && activeTab.branch && activeTab.semester && activeTab.type) {
       checkForExistingTimetable(activeTab);
     }
   };
@@ -320,7 +320,7 @@ const TimeTable = () => {
       if (tab.timetableId) return;
       
       const result = await findTimetableByFields(
-        tab.course,
+        tab.program,
         tab.branch, 
         tab.semester,
         tab.type,
@@ -351,7 +351,7 @@ const TimeTable = () => {
           setStats(statistics.data);
         }
         
-        setSuccess(`Found and loaded existing timetable: ${existingTimetable.course} ${existingTimetable.branch}`);
+        setSuccess(`Found and loaded existing timetable: ${existingTimetable.program} ${existingTimetable.branch}`);
       }
     } catch (error) {
       console.error('Error checking for existing timetable:', error);
@@ -373,8 +373,8 @@ const TimeTable = () => {
     const activeTab = getActiveTab();
     if (!activeTab) return;
 
-    if (!activeTab.course || !activeTab.branch || !activeTab.semester || !activeTab.type) {
-      setError('Please fill all required fields (Course, Branch, Semester, Type)');
+    if (!activeTab.program || !activeTab.branch || !activeTab.semester || !activeTab.type) {
+      setError('Please fill all required fields (Program, Branch, Semester, Type)');
       return;
     }
 
@@ -385,7 +385,7 @@ const TimeTable = () => {
     try {
       // Create clean timetable data structure
       const timetableData = {
-        course: activeTab.course,
+        program: activeTab.program,
         branch: activeTab.branch,
         semester: activeTab.semester,
         type: activeTab.type
@@ -563,7 +563,7 @@ const TimeTable = () => {
           timetableId: null,
           isModified: true,
           name: generateTabName(
-            activeTab.course,
+            activeTab.program,
             activeTab.branch,
             activeTab.semester,
             activeTab.type,
@@ -723,13 +723,13 @@ const TimeTable = () => {
               {/* Tab Configuration Fields */}
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Course</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Program</label>
                   <input
                     type="text"
-                    value={activeTab?.course || ''}
-                    onChange={(e) => updateTabField('course', e.target.value)}
+                    value={activeTab?.program || ''}
+                    onChange={(e) => updateTabField('program', e.target.value)}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
-                    placeholder="e.g., Computer Science"
+                    placeholder="e.g., BTech, BSc, MSc"
                   />
                 </div>
 
@@ -1057,7 +1057,7 @@ const TimeTable = () => {
                       <div className="flex items-center justify-between">
                         <div className="flex-1">
                           <div className="font-semibold text-slate-800 group-hover:text-indigo-800 mb-1">
-                            {timetable.course} - {timetable.branch}
+                            {timetable.program} - {timetable.branch}
                           </div>
                           <div className="text-sm text-slate-600 flex items-center gap-3">
                             <span>📚 Semester {timetable.semester}</span>

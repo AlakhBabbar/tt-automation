@@ -42,7 +42,7 @@ export const WEEKDAYS = [
 // Initialize empty timetable structure
 export const createEmptyTimetable = () => {
   const timetable = {
-    course: '',
+    program: '',
     branch: '',
     semester: '',
     type: '', // full-time or part-time
@@ -72,7 +72,7 @@ export const validateTimetableData = (timetableData) => {
   const errors = [];
   
   // Check required fields
-  if (!timetableData.course) errors.push('Course is required');
+  if (!timetableData.program) errors.push('Program is required');
   if (!timetableData.branch) errors.push('Branch is required');
   if (!timetableData.semester) errors.push('Semester is required');
   if (!timetableData.type) errors.push('Type is required');
@@ -126,14 +126,14 @@ export const getAllTimetables = async () => {
 };
 
 // Find timetable by field matching
-export const findTimetableByFields = async (course, branch, semester, type, batch = null) => {
+export const findTimetableByFields = async (program, branch, semester, type, batch = null) => {
   try {
     const timetablesRef = collection(db, COLLECTION_NAME);
     
     // Build query with required fields
     let q = query(
       timetablesRef,
-      where('course', '==', course),
+      where('program', '==', program),
       where('branch', '==', branch),
       where('semester', '==', semester),
       where('type', '==', type)
@@ -220,7 +220,7 @@ export const addTimetable = async (timetableData) => {
     const existingTimetables = await getAllTimetables();
     if (existingTimetables.success) {
       const duplicate = existingTimetables.data.find(tt => 
-        tt.course === timetableData.course &&
+        tt.program === timetableData.program &&
         tt.branch === timetableData.branch &&
         tt.semester === timetableData.semester &&
         tt.type === timetableData.type &&
@@ -282,7 +282,7 @@ export const updateTimetable = async (timetableId, timetableData) => {
     if (existingTimetables.success) {
       const duplicate = existingTimetables.data.find(tt => 
         tt.id !== timetableId &&
-        tt.course === timetableData.course &&
+        tt.program === timetableData.program &&
         tt.branch === timetableData.branch &&
         tt.semester === timetableData.semester &&
         tt.type === timetableData.type &&
@@ -548,8 +548,8 @@ export const checkRealTimeConflicts = async (currentTimetables, day, timeSlot, s
           conflicts.push({
             type: 'teacher',
             severity: 'high',
-            message: `Teacher "${slotData.teacher}" is already scheduled in ${timetable.course} ${timetable.branch} at ${timeSlot} on ${day}`,
-            conflictWith: `${timetable.course} ${timetable.branch} (${timetable.semester})`
+            message: `Teacher "${slotData.teacher}" is already scheduled in ${timetable.program} ${timetable.branch} at ${timeSlot} on ${day}`,
+            conflictWith: `${timetable.program} ${timetable.branch} (${timetable.semester})`
           });
         }
         
@@ -558,8 +558,8 @@ export const checkRealTimeConflicts = async (currentTimetables, day, timeSlot, s
           conflicts.push({
             type: 'room',
             severity: 'high',
-            message: `Room "${slotData.room}" is already booked for ${timetable.course} ${timetable.branch} at ${timeSlot} on ${day}`,
-            conflictWith: `${timetable.course} ${timetable.branch} (${timetable.semester})`
+            message: `Room "${slotData.room}" is already booked for ${timetable.program} ${timetable.branch} at ${timeSlot} on ${day}`,
+            conflictWith: `${timetable.program} ${timetable.branch} (${timetable.semester})`
           });
         }
       }
@@ -612,7 +612,7 @@ export const getTimetableStatistics = async () => {
 
     const timetables = result.data;
     const branches = [...new Set(timetables.map(tt => tt.branch).filter(Boolean))];
-    const courses = [...new Set(timetables.map(tt => tt.course).filter(Boolean))];
+    const programs = [...new Set(timetables.map(tt => tt.program).filter(Boolean))];
     const semesters = [...new Set(timetables.map(tt => tt.semester).filter(Boolean))];
     
     // Count filled time slots
@@ -638,7 +638,7 @@ export const getTimetableStatistics = async () => {
       data: {
         totalTimetables: timetables.length,
         branches: branches.length,
-        courses: courses.length,
+        programs: programs.length,
         semesters: semesters.length,
         totalSlots,
         filledSlots,
@@ -680,7 +680,7 @@ export const getTeacherSchedule = async (teacherName) => {
               schedule[day][slot].push({
                 course: timeSlot.course,
                 room: timeSlot.room,
-                timetableInfo: `${timetable.course} - ${timetable.branch} - Sem ${timetable.semester}`
+                timetableInfo: `${timetable.program} - ${timetable.branch} - Sem ${timetable.semester}`
               });
             }
           });
@@ -727,7 +727,7 @@ export const getRoomUtilization = async (roomName) => {
               utilization[day][slot].push({
                 course: timeSlot.course,
                 teacher: timeSlot.teacher,
-                timetableInfo: `${timetable.course} - ${timetable.branch} - Sem ${timetable.semester}`
+                timetableInfo: `${timetable.program} - ${timetable.branch} - Sem ${timetable.semester}`
               });
             }
           });
