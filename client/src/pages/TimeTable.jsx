@@ -133,14 +133,21 @@ const TimeTable = () => {
 
   // Load timetable when active tab changes
   useEffect(() => {
+    console.log(`🔄 useEffect triggered - activeTabId: ${activeTabId}`);
     const activeTab = getActiveTab();
+    console.log(`📋 Active tab:`, activeTab);
+    
     if (activeTab) {
       if (activeTab.timetableId) {
+        console.log(`📂 Loading existing timetable ID: ${activeTab.timetableId}`);
         loadTimetableForTab(activeTab.timetableId);
       } else {
         // For new tabs, check if we have temporary data
         const tempData = tempTimetableData[activeTab.id];
+        console.log(`💾 Checking temp data for tab ${activeTab.id}:`, tempData);
+        
         if (tempData) {
+          console.log(`✅ Found temp data, setting currentTimetable to:`, tempData);
           setCurrentTimetable(tempData);
           // Calculate stats for temp data
           getTimetableStatistics(tempData).then(statistics => {
@@ -149,6 +156,7 @@ const TimeTable = () => {
             }
           });
         } else {
+          console.log(`🆕 No temp data, creating empty timetable`);
           // Initialize with empty timetable
           const emptyTimetable = createEmptyTimetable();
           setCurrentTimetable(emptyTimetable);
@@ -166,6 +174,8 @@ const TimeTable = () => {
           checkTabConflicts(activeTab.id);
         }
       }, 100); // Small delay to ensure timetable is loaded
+    } else {
+      console.log(`⚠️ No active tab found`);
     }
   }, [activeTabId, timetables, tempTimetableData]);
 
@@ -623,42 +633,28 @@ const TimeTable = () => {
               return updatedTabs;
             });
             
-            // If this is the first generated timetable, switch to it immediately
-            if (index === 0) {
-              console.log(`🎯 Setting active tab to ${nextTabId} and loading timetable data`);
-              console.log(`📊 Current timetable being set:`, processedTimetable);
-              
-              setActiveTabId(nextTabId);
-              setCurrentTimetable(processedTimetable);
-              
-              // Calculate stats for the active timetable
-              try {
-                const statistics = await getTimetableStatistics(processedTimetable);
-                if (statistics.success) {
-                  setStats(statistics.data);
-                  console.log(`📈 Stats calculated:`, statistics.data);
-                }
-              } catch (error) {
-                console.warn('Could not calculate stats:', error);
-              }
-              
-              // Check conflicts for the active timetable
-              setTimeout(() => {
-                checkTabConflicts(nextTabId);
-              }, 100);
-            } else {
-              // Store other timetables in temporary data for when user switches tabs
-              console.log(`💾 Storing timetable ${index + 1} in temp data for tab ${nextTabId + index}`);
-              setTempTimetableData(prev => {
-                const updated = {
-                  ...prev,
-                  [nextTabId + index]: processedTimetable
-                };
-                console.log(`💾 Updated temp data:`, updated);
-                return updated;
-              });
-            }
+            // CRITICAL: Store timetable data BEFORE setting active tab to ensure useEffect can find it
+            console.log(`� Storing timetable data for tab ${nextTabId + index} BEFORE activating tab`);
+            setTempTimetableData(prev => {
+              const updated = {
+                ...prev,
+                [nextTabId + index]: processedTimetable
+              };
+              console.log(`� Updated temp data:`, updated);
+              return updated;
+            });
+            
+            // Store timetable data for ALL tabs to ensure they can be accessed
+            setTempTimetableData(prev => ({
+              ...prev,
+              [nextTabId + index]: processedTimetable
+            }));
           }
+          
+          // After ALL tabs and data are set, switch to the first generated timetable
+          setTimeout(() => {
+            setActiveTabId(nextTabId);
+          }, 200);
           
           // Update next tab ID for future tabs
           setNextTabId(nextTabId + result.data.data.timetables.length);
@@ -1028,10 +1024,20 @@ const TimeTable = () => {
   };
 
   const getTimeSlotData = (day, timeSlot) => {
-    if (!currentTimetable) return { course: '', teacher: '', room: '' };
+    if (!currentTimetable) {
+      console.log(`⚠️ getTimeSlotData: currentTimetable is null/undefined for ${day} ${timeSlot}`);
+      return { course: '', teacher: '', room: '' };
+    }
     
     const dayKey = day.toLowerCase();
     const data = currentTimetable[dayKey]?.[timeSlot] || { course: '', teacher: '', room: '' };
+    
+    // Only log when there's actual data to avoid spam
+    if (data.course || data.teacher || data.room) {
+      console.log(`📅 getTimeSlotData(${day}, ${timeSlot}):`, data);
+      console.log(`📊 currentTimetable[${dayKey}][${timeSlot}]:`, currentTimetable[dayKey]?.[timeSlot]);
+    }
+    
     return data;
   };
 
