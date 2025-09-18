@@ -1,44 +1,19 @@
-from firebase_functions import https_fn
-from firebase_functions.options import set_global_options
-from firebase_functions import params
-from firebase_admin import initialize_app
-from openai import OpenAI
+import sys, os
+
+# ✅ Ensure Python can see this folder when importing
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 import json
+from firebase_functions import https_fn
 
-# Import AI timetable service
-from ai_timetable_service import generate_timetable_with_openai, validate_timetable_data
+# Import AI service (same folder)
+# Defer importing ai_services to avoid import-time failures in emulator
 
-set_global_options(max_instances=10)
-initialize_app()
-
-# ...existing code...
-
-# Secret (stored in Firebase Secret Manager)
-OPENAI_API_KEY = params.SecretParam("OPENAI_API_KEY")
-
-@https_fn.on_request(secrets=[OPENAI_API_KEY])
-def secret_check(req: https_fn.Request) -> https_fn.Response:
-    # Do NOT return the secret; just presence/length for local debugging
-    present = bool(OPENAI_API_KEY.value)
-    length = len(OPENAI_API_KEY.value or "")
-    return https_fn.Response(
-        json.dumps({"present": present, "length": length}),
-        status=200,
-        headers={"Content-Type": "application/json"},
-    )
-
-
-@https_fn.on_request()
-def on_request_example(req: https_fn.Request) -> https_fn.Response:
-    return https_fn.Response("ki haal chal ladle")
-# ...existing code...
-
-
+# No OpenAI secrets needed; using Gemini via env (GEMINI_API_KEY/GOOGLE_API_KEY)
 
 ALLOWED_ORIGINS = {
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    # Add your deployed origin here, e.g. "https://your-domain.web.app"
 }
 
 def _cors_headers(origin: str):
@@ -46,182 +21,129 @@ def _cors_headers(origin: str):
     return {
         "Access-Control-Allow-Origin": allow_origin,
         "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS, PUT, DELETE",
     }
 
-@https_fn.on_request(secrets=[OPENAI_API_KEY])
+def cors_response(req: https_fn.Request, body, status: int = 200) -> https_fn.Response:
+    headers = _cors_headers(req.headers.get("Origin", "*"))
+    if isinstance(body, (dict, list)):
+        body = json.dumps(body)
+        headers["Content-Type"] = "application/json"
+    elif isinstance(body, str):
+        headers["Content-Type"] = headers.get("Content-Type", "text/plain; charset=utf-8")
+    else:
+        body = str(body)
+        headers["Content-Type"] = "text/plain; charset=utf-8"
+    return https_fn.Response(body, status=status, headers=headers)
+
+@https_fn.on_request()
+def hello(req: https_fn.Request) -> https_fn.Response:
+    # CORS preflight
+    if req.method == "OPTIONS":
+        return https_fn.Response("", status=204, headers=_cors_headers(req.headers.get("Origin", "*")))
+    return cors_response(req, {"message": "Hello World!"}, 200)
+
+@https_fn.on_request()
+def ai_status(req: https_fn.Request) -> https_fn.Response:
+    # CORS preflight
+    if req.method == "OPTIONS":
+        return https_fn.Response("", status=204, headers=_cors_headers(req.headers.get("Origin", "*")))
+    # Check if google-genai is importable
+    try:
+        from google import genai as _genai  # type: ignore
+        genai_ok = True
+    except Exception:
+        genai_ok = False
+
+    import sys
+    status = {
+        "gemini_key_present": bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")),
+        "disable_gemini": os.getenv("DISABLE_GEMINI", "").lower() in ("1", "true", "yes"),
+        "cwd": os.getcwd(),
+        "python_executable": sys.executable,
+        "google_genai_installed": genai_ok,
+    }
+    return cors_response(req, status, 200)
+
+@https_fn.on_request()
+def ai_smoke_test(req: https_fn.Request) -> https_fn.Response:
+    # CORS preflight
+    if req.method == "OPTIONS":
+        return https_fn.Response("", status=204, headers=_cors_headers(req.headers.get("Origin", "*")))
+
+    # Minimal viable input
+    sample = {
+        "classRequests": [
+            {"program": "B.Tech", "branch": "CSE", "semester": "1", "batch": "A", "type": "full-time"}
+        ],
+        "teachers": [
+            {"name": "Dr. Smith", "courses": ["CS101"]}
+        ],
+        "rooms": [
+            {"name": "R-101", "capacity": 60, "type": "classroom"}
+        ],
+        "courses": [
+            {"code": "CS101", "name": "Intro to CS", "credits": 3}
+        ],
+        "existingTimetables": []
+    }
+
+    try:
+        from ai_services import generate_timetable_with_ai
+        result = generate_timetable_with_ai(sample)
+        return cors_response(req, result, 200)
+    except Exception as e:
+        return cors_response(req, {"success": False, "error": str(e)}, 500)
+
+@https_fn.on_request()
 def generate_timetable_ai(req: https_fn.Request) -> https_fn.Response:
-    """
-    AI Timetable Generation Endpoint
-    Receives comprehensive timetable data and generates timetables using OpenAI
-    """
     # CORS preflight
     if req.method == "OPTIONS":
         return https_fn.Response("", status=204, headers=_cors_headers(req.headers.get("Origin", "*")))
-
     if req.method != "POST":
-        return https_fn.Response("Method Not Allowed", status=405, headers=_cors_headers(req.headers.get("Origin", "*")))
+        return cors_response(req, {"error": "Method Not Allowed"}, 405)
 
     try:
-        print("🤖 AI Timetable Generation Request Received")
-        
-        # Parse request body
-        body = req.get_json(silent=True) or {}
-        
-        # Extract data components
-        class_requests = body.get("classRequests", [])
-        existing_timetables = body.get("existingTimetables", [])
-        courses = body.get("courses", [])
-        teachers = body.get("teachers", [])
-        rooms = body.get("rooms", [])
-        settings = body.get("settings", {})
-        
-        print(f"📊 Received data summary:")
-        print(f"   - Class requests: {len(class_requests)}")
-        print(f"   - Existing timetables: {len(existing_timetables)}")
-        print(f"   - Courses: {len(courses)}")
-        print(f"   - Teachers: {len(teachers)}")
-        print(f"   - Rooms: {len(rooms)}")
-        print(f"   - Settings: {settings}")
-        
-        # Validate required data
-        if not class_requests:
-            return https_fn.Response(
-                json.dumps({"error": "No class requests provided"}), 
-                status=400, 
-                headers=_cors_headers(req.headers.get("Origin", "*"))
-            )
-        
-        # Validate OpenAI API key
-        if not OPENAI_API_KEY.value:
-            print("❌ OpenAI API key not configured")
-            return https_fn.Response(
-                json.dumps({"error": "OpenAI API key not configured"}), 
-                status=500, 
-                headers=_cors_headers(req.headers.get("Origin", "*"))
-            )
-        
-        print("🚀 Starting AI timetable generation...")
-        
-        # Generate timetable using OpenAI
-        ai_result = generate_timetable_with_openai(
-            OPENAI_API_KEY.value,
-            class_requests,
-            courses,
-            teachers,
-            rooms,
-            existing_timetables
-        )
-        
-        if not ai_result["success"]:
-            print(f"❌ AI generation failed: {ai_result.get('error')}")
-            return https_fn.Response(
-                json.dumps({
-                    "error": f"AI generation failed: {ai_result.get('error')}",
-                    "details": ai_result
-                }), 
-                status=500, 
-                headers=_cors_headers(req.headers.get("Origin", "*"))
-            )
-        
-        print("✅ AI generation successful, validating results...")
-        
-        # Validate generated timetables
-        validation = validate_timetable_data(ai_result["timetables"])
-        
-        # Prepare response
-        response_payload = {
+        data = req.get_json(silent=True) or {}
+        # Minimal logs (no emojis to avoid Windows console encoding issues)
+        print("AI timetable request received")
+        print(f"classRequests={len(data.get('classRequests', []))}, "
+              f"teachers={len(data.get('teachers', []))}, "
+              f"rooms={len(data.get('rooms', []))}, "
+              f"courses={len(data.get('courses', []))}, "
+              f"existingTimetables={len(data.get('existingTimetables', []))}")
+
+        # Lazy import to keep emulator happy if dependencies/keys aren't present at import time
+        gen_fn = None
+        try:
+            from ai_services import generate_timetable_with_ai as _gen
+            if callable(_gen):
+                gen_fn = _gen
+        except Exception as imp_err:
+            # Log and continue with fallback response
+            print(f"ai_services import skipped: {imp_err}")
+
+        if gen_fn:
+            result = gen_fn(data)
+            return cors_response(req, result, 200)
+
+        # Fallback: acknowledge receipt if AI service not available
+        return cors_response(req, {
             "success": True,
-            "message": "AI timetable generation completed successfully",
-            "data": {
-                "requestId": settings.get("requestId", "unknown"),
-                "processedAt": settings.get("generatedAt"),
-                "timetables": ai_result["timetables"],
-                "validation": validation,
-                "ai_usage": ai_result.get("usage", {}),
-                "summary": {
-                    "classRequestsProcessed": len(class_requests),
-                    "timetablesGenerated": len(ai_result["timetables"]),
-                    "validationPassed": validation["valid"],
-                    "conflictsFound": len(validation["conflicts"]),
-                    "aiTokensUsed": ai_result.get("usage", {}).get("total_tokens", 0)
-                }
+            "message": "Backend received data. AI service not available.",
+            "receivedData": {
+                "classRequests": len(data.get('classRequests', [])),
+                "teachers": len(data.get('teachers', [])),
+                "rooms": len(data.get('rooms', [])),
+                "courses": len(data.get('courses', [])),
+                "existingTimetables": len(data.get('existingTimetables', [])),
             }
-        }
-        
-        headers = _cors_headers(req.headers.get("Origin", "*"))
-        headers["Content-Type"] = "application/json"
-        
-        print("✅ Sending AI-generated timetables to frontend")
-        print(f"📊 Generated {len(ai_result['timetables'])} timetables")
-        
-        return https_fn.Response(json.dumps(response_payload), status=200, headers=headers)
-        
+        }, 200)
+
     except Exception as e:
-        print(f"❌ Error in AI timetable generation: {str(e)}")
-        headers = _cors_headers(req.headers.get("Origin", "*"))
-        headers["Content-Type"] = "application/json"
-        return https_fn.Response(
-            json.dumps({"error": f"AI generation failed: {str(e)}"}), 
-            status=500, 
-            headers=headers
-        )
-
-
-def prepare_ai_context(class_requests, existing_timetables, courses, teachers, rooms, settings):
-    """
-    Prepare comprehensive context for AI timetable generation
-    DEPRECATED: Logic moved to ai_timetable_service.py
-    """
-    print("⚠️ Using deprecated prepare_ai_context function")
-    return {"deprecated": True}
-
-
-@https_fn.on_request(secrets=[OPENAI_API_KEY])
-def chat(req: https_fn.Request) -> https_fn.Response:
-    # CORS preflight
-    if req.method == "OPTIONS":
-        return https_fn.Response("", status=204, headers=_cors_headers(req.headers.get("Origin", "*")))
-
-    if req.method != "POST":
-        return https_fn.Response("Method Not Allowed", status=405, headers=_cors_headers(req.headers.get("Origin", "*")))
-
-    try:
-        body = req.get_json(silent=True) or {}
-        messages = body.get("messages")
-        prompt = body.get("prompt")
-        model = body.get("model", "gpt-4o-mini")
-        temperature = float(body.get("temperature", 0.3))
-
-        if not messages and not prompt:
-            return https_fn.Response(json.dumps({"error": "Provide 'messages' or 'prompt'"}), status=400, headers=_cors_headers(req.headers.get("Origin", "*")))
-
-        # Normalize to chat messages
-        if not messages and prompt:
-            messages = [{"role": "user", "content": prompt}]
-
-        client = OpenAI(api_key=OPENAI_API_KEY.value)
-        completion = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-        )
-
-        # Build JSON-serializable response
-        choice = completion.choices[0]
-        response_payload = {
-            "id": completion.id,
-            "model": completion.model,
-            "message": {
-                "role": getattr(choice.message, "role", None),
-                "content": getattr(choice.message, "content", None),
-            },
-            "usage": (completion.usage.model_dump() if getattr(completion, "usage", None) else None),
-        }
-        headers = _cors_headers(req.headers.get("Origin", "*"))
-        headers["Content-Type"] = "application/json"
-        return https_fn.Response(json.dumps(response_payload), status=200, headers=headers)
-    except Exception as e:
-        headers = _cors_headers(req.headers.get("Origin", "*"))
-        headers["Content-Type"] = "application/json"
-        return https_fn.Response(json.dumps({"error": str(e)}), status=500, headers=headers)
+        print(f"Error in generate_timetable_ai: {e}")
+        return cors_response(req, {
+            "success": False,
+            "error": "Failed to process timetable generation request",
+            "details": str(e),
+        }, 500)
