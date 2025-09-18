@@ -376,6 +376,138 @@ const TimeTable = () => {
     }
   };
 
+  // Process AI-generated timetables and create tabs automatically
+  const processGeneratedTimetables = async (generatedTimetables) => {
+    console.log('🔄 Processing generated timetables:', generatedTimetables.length);
+    
+    for (let i = 0; i < generatedTimetables.length; i++) {
+      const timetableData = generatedTimetables[i];
+      console.log(`📋 Processing timetable ${i + 1}:`, timetableData);
+      
+      const timetable = timetableData.timetable;
+      
+      if (!timetable) {
+        console.warn('⚠️ Skipping timetable without structure:', timetableData);
+        continue;
+      }
+      
+      console.log('🏗️ Processing room IDs in timetable...');
+      // Convert room IDs to room names for better display
+      const processedTimetable = await processRoomIdsInTimetable(timetable);
+      console.log('✅ Room IDs processed');
+      
+      // Generate tab name from timetable metadata
+      const tabName = generateTabName(
+        processedTimetable.program,
+        processedTimetable.branch,
+        processedTimetable.semester,
+        processedTimetable.type,
+        processedTimetable.batch
+      );
+      
+      // Create new tab for this timetable
+      const newTab = {
+        id: nextTabId + i,
+        name: tabName,
+        timetableId: null, // This is a new unsaved timetable
+        program: processedTimetable.program || '',
+        branch: processedTimetable.branch || '',
+        semester: processedTimetable.semester || '',
+        type: processedTimetable.type || '',
+        batch: processedTimetable.batch || '',
+        overallCredits: processedTimetable.overallCredits || '',
+        isActive: false,
+        isModified: true // Mark as modified since it has AI-generated content
+      };
+      
+      console.log(`📋 Creating tab ${i + 1}: ${tabName}`);
+      console.log(`🏷️ New tab data:`, newTab);
+      
+      // Add the tab
+      setTabs(prevTabs => {
+        const updatedTabs = [...prevTabs, newTab];
+        console.log('📑 Updated tabs:', updatedTabs.map(t => ({ id: t.id, name: t.name })));
+        return updatedTabs;
+      });
+      
+      // Store the timetable data temporarily (since it's not saved yet)
+      setTempTimetableData(prevData => {
+        const updatedData = {
+          ...prevData,
+          [newTab.id]: processedTimetable
+        };
+        console.log(`💾 Stored timetable data for tab ${newTab.id}`);
+        return updatedData;
+      });
+      
+      // If this is the first generated timetable, switch to its tab
+      if (i === 0) {
+        console.log(`🔄 Switching to tab ${newTab.id}`);
+        setActiveTabId(newTab.id);
+        setCurrentTimetable(processedTimetable);
+        
+        // Calculate stats for the new timetable
+        try {
+          const statistics = await getTimetableStatistics(processedTimetable);
+          if (statistics.success) {
+            setStats(statistics.data);
+          }
+        } catch (error) {
+          console.warn('Could not calculate stats for generated timetable:', error);
+        }
+        
+        // Check conflicts for the new timetable after a short delay
+        setTimeout(() => {
+          checkTabConflicts(newTab.id);
+        }, 500);
+      }
+    }
+    
+    // Update nextTabId for future tabs
+    setNextTabId(prevId => prevId + generatedTimetables.length);
+    
+    console.log('✅ All timetable tabs created successfully');
+  };
+
+  // Convert room IDs to room names in timetable data
+  const processRoomIdsInTimetable = (timetable) => {  // Remove async since we don't need it
+    console.log('🔧 Processing room IDs in timetable...');
+    console.log('🏗️ Input timetable:', timetable);
+    console.log('🏢 Available rooms:', rooms);
+    
+    const processedTimetable = { ...timetable };
+    const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    
+    for (const day of days) {
+      if (processedTimetable[day]) {
+        console.log(`📅 Processing ${day}:`, processedTimetable[day]);
+        
+        for (const timeSlot of Object.keys(processedTimetable[day])) {
+          const slot = processedTimetable[day][timeSlot];
+          if (slot && slot.room) {
+            console.log(`🕐 Processing ${timeSlot} - Original room:`, slot.room);
+            
+            // Find room name by ID
+            const room = rooms.find(r => r.id === slot.room);
+            if (room) {
+              console.log(`✅ Found room: ${room.name} for ID: ${slot.room}`);
+              processedTimetable[day][timeSlot] = {
+                ...slot,
+                room: room.name
+              };
+            } else {
+              console.log(`⚠️ Room not found for ID: ${slot.room}, keeping original`);
+              // If room not found, keep the original ID (fallback)
+            }
+          }
+        }
+      }
+    }
+    
+    console.log('✅ Processed timetable:', processedTimetable);
+    return processedTimetable;
+  };
+
   const handleGenerateWithAI = async () => {
     // Close modal immediately when button is pressed
     setShowAIModal(false);
@@ -390,7 +522,7 @@ const TimeTable = () => {
       // Test backend connection first
       try {
         console.log('🔍 Testing backend connection...');
-        const testResponse = await fetch(`${API_BASE_URL}/on_request_example`);
+        const testResponse = await fetch(`${API_BASE_URL}/api/timetable/health`);
         console.log('📡 Test response status:', testResponse.status);
         if (testResponse.ok) {
           const testText = await testResponse.text();
@@ -403,7 +535,7 @@ const TimeTable = () => {
         }
       } catch (testError) {
         console.error('❌ Backend connection test failed:', testError);
-        setError(`Cannot connect to backend: ${testError.message}. Make sure Firebase Functions emulator is running.`);
+        setError(`Cannot connect to backend: ${testError.message}. Make sure Express server is running on port 3000.`);
         return;
       }
       
@@ -438,37 +570,118 @@ const TimeTable = () => {
       if (result.success) {
         console.log('✅ AI generation successful');
         
-        // Check if we got actual timetables
-        if (result.data.timetables && result.data.timetables.length > 0) {
-          console.log(`🎓 AI generated ${result.data.timetables.length} timetable(s)`);
+        
+        console.log("result.data: ", result.data)
+        console.log("result.data.data.timetables: ", result.data.data.timetables)
+        console.log("result.data.data.timetables.length: ", result.data.data.timetables.length)
+        // Check if we got structured timetables from Express backend
+        if (result.data && result.data.data && result.data.data.timetables && result.data.data.timetables.length > 0) {
+          console.log(`🎓 AI generated ${result.data.data.timetables.length} timetable(s)`);
+          console.log('📋 Timetables data:', result.data.data.timetables);
           
-          const conflictsCount = result.data.validation?.conflicts?.length || 0;
-          const validationStatus = result.data.validation?.valid ? '✅ Valid' : '⚠️ Has conflicts';
-          
-          setSuccess(
-            `🎉 AI Generated ${result.data.timetables.length} timetable(s) successfully! ` +
-            `${validationStatus} (${conflictsCount} conflicts found).`
-          );
-          
-          if (conflictsCount > 0) {
-            console.warn(`⚠️ ${conflictsCount} conflicts found in generated timetables`);
+          // Process each generated timetable and create tabs (following openExistingTimetable pattern)
+          for (let index = 0; index < result.data.data.timetables.length; index++) {
+            const generatedTimetable = result.data.data.timetables[index];
+            const timetableData = generatedTimetable.timetable;
+
+            console.log(`🔄 Processing timetable ${index + 1}:`, timetableData);
+            
+            // Process room IDs to names
+            const processedTimetable = processRoomIdsInTimetable(timetableData);
+
+            console.log(`✅ Processed timetable ${index + 1}:`, processedTimetable);
+            
+            console.log(`🏗️ Creating tab ${index + 1} for:`, {
+              program: processedTimetable.program,
+              branch: processedTimetable.branch,
+              semester: processedTimetable.semester,
+              type: processedTimetable.type,
+              batch: processedTimetable.batch
+            });
+            
+            // Create new tab for this AI-generated timetable (exact same logic as openExistingTimetable)
+            const newTab = {
+              id: nextTabId + index,
+              name: generateTabName(processedTimetable.program, processedTimetable.branch, processedTimetable.semester, processedTimetable.type, processedTimetable.batch),
+              timetableId: null, // AI-generated timetables don't have saved IDs yet
+              program: processedTimetable.program,
+              branch: processedTimetable.branch,
+              semester: processedTimetable.semester,
+              type: processedTimetable.type,
+              batch: processedTimetable.batch || '',
+              overallCredits: processedTimetable.overallCredits || '',
+              isActive: false,
+              isModified: true // Mark as modified since it's not saved yet
+            };
+            
+            console.log(`📝 Created new tab for timetable ${index + 1}:`, newTab);
+            
+            // Add tab to the list
+            setTabs(prevTabs => {
+              const updatedTabs = [...prevTabs, newTab];
+              console.log(`📋 Updated tabs (after adding ${index + 1}):`, updatedTabs.map(t => ({ id: t.id, name: t.name })));
+              return updatedTabs;
+            });
+            
+            // If this is the first generated timetable, switch to it immediately
+            if (index === 0) {
+              console.log(`🎯 Setting active tab to ${nextTabId} and loading timetable data`);
+              console.log(`📊 Current timetable being set:`, processedTimetable);
+              
+              setActiveTabId(nextTabId);
+              setCurrentTimetable(processedTimetable);
+              
+              // Calculate stats for the active timetable
+              try {
+                const statistics = await getTimetableStatistics(processedTimetable);
+                if (statistics.success) {
+                  setStats(statistics.data);
+                  console.log(`📈 Stats calculated:`, statistics.data);
+                }
+              } catch (error) {
+                console.warn('Could not calculate stats:', error);
+              }
+              
+              // Check conflicts for the active timetable
+              setTimeout(() => {
+                checkTabConflicts(nextTabId);
+              }, 100);
+            } else {
+              // Store other timetables in temporary data for when user switches tabs
+              console.log(`💾 Storing timetable ${index + 1} in temp data for tab ${nextTabId + index}`);
+              setTempTimetableData(prev => {
+                const updated = {
+                  ...prev,
+                  [nextTabId + index]: processedTimetable
+                };
+                console.log(`💾 Updated temp data:`, updated);
+                return updated;
+              });
+            }
           }
           
+          // Update next tab ID for future tabs
+          setNextTabId(nextTabId + result.data.data.timetables.length);
+          
+          setSuccess(`🎉 Successfully generated ${result.data.data.timetables.length} timetable(s) and created ${result.data.data.timetables.length} new tab(s)!`);
+          
         } else {
-          setSuccess(`✅ Backend connected successfully! ${result.data.message}`);
+          // Handle cases where response format is different
+          console.log('🤖 AI Response received:', result.data);
+          setSuccess(`🎉 AI Response Generated! Please check the response format if its not getting displayed`);
         }
         
         // Show success message for a bit longer
         setTimeout(() => {
-          setSuccess('🤖 AI timetable generation completed!');
-        }, 3000);
+          setSuccess('🤖 AI timetable generation completed! Check the new tabs for visualized timetables.');
+        }, 5000);
         
       } else {
         console.error('❌ AI generation failed:', result.error);
         
         // Check if it's a connection error
         if (result.error.includes('fetch') || result.error.includes('network') || result.error.includes('connection')) {
-          setError(`🔌 Backend connection failed: ${result.error}. Please ensure the Firebase Functions emulator is running on port 5001.`);
+          setError(`🔌 Backend connection failed: ${result.error}. Please ensure the Express server is running on port 3000.`);
         } else {
           setError(`AI generation failed: ${result.error}`);
         }
@@ -479,7 +692,7 @@ const TimeTable = () => {
       
       // Provide specific error messages based on error type
       if (error.name === 'TypeError' && error.message.includes('fetch')) {
-        setError('🔌 Cannot connect to backend. Please start the Firebase Functions emulator first:\n1. Open terminal\n2. cd backend-cloud/functions\n3. firebase emulators:start --only functions');
+        setError('🔌 Cannot connect to backend. Please start the Express server first:\n1. Open terminal\n2. cd backend-local\n3. npm start');
       } else {
         setError(`Unexpected error: ${error.message}`);
       }

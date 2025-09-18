@@ -18,7 +18,7 @@ import {
 } from 'react-icons/fi';
 
 const Menu = () => {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(true);
   const location = useLocation();
 
   // Update CSS custom property when menu state changes

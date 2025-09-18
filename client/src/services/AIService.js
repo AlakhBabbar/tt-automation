@@ -6,7 +6,60 @@ import { API_BASE_URL } from '../firebase/firebaseConfig';
  */
 
 /**
- * Generate timetable using AI
+ * Transform frontend request data to Express backend format
+ * @param {Object} requestData - Frontend request data
+ * @returns {Object} Transformed data for Express backend
+ */
+const transformDataForExpressBackend = (requestData) => {
+  // Transform class requests to classes format
+  const classes = requestData.classRequests.map((classRequest, index) => ({
+    id: `${classRequest.program}-${classRequest.branch}-${classRequest.semester}${classRequest.batch ? `-${classRequest.batch}` : ''}`,
+    batch: classRequest.batch,
+    branch: classRequest.branch,
+    semester: classRequest.semester,
+    program: classRequest.program,
+    type: classRequest.type,
+    overallCredits: classRequest.credits
+  }));
+
+  // Transform courses to the format expected by backend
+  const courses = requestData.courses.map(course => ({
+    id: course.id || course.code || course.name,
+    name: course.name,
+    code: course.code || course.id,
+    credits: course.credits || 3,
+    type: course.type || 'theory',
+    hoursPerWeek: course.hoursPerWeek || course.credits || 3
+  }));
+
+  // Transform teachers to the format expected by backend
+  const teachers = requestData.teachers.map(teacher => ({
+    id: teacher.id,
+    name: teacher.name,
+    department: teacher.department || '',
+    subjects: teacher.subjects || [],
+    maxHoursPerWeek: teacher.maxHoursPerWeek || 20
+  }));
+
+  // Transform rooms to the format expected by backend
+  const rooms = requestData.rooms.map(room => ({
+    id: room.id,
+    name: room.name,
+    capacity: room.capacity || 50,
+    type: room.type || 'classroom',
+    equipment: room.equipment || []
+  }));
+
+  return {
+    classes,
+    courses,
+    teachers,
+    rooms
+  };
+};
+
+/**
+ * Generate timetable using AI via Express backend
  * @param {Object} requestData - The complete request data for AI generation
  * @param {Array} requestData.classRequests - Array of class requirements
  * @param {Array} requestData.existingTimetables - Selected existing timetables (if any)
@@ -18,15 +71,18 @@ import { API_BASE_URL } from '../firebase/firebaseConfig';
  */
 export const generateTimetableWithAI = async (requestData) => {
   try {
-    console.log('🤖 Sending AI generation request to:', `${API_BASE_URL}/generate-timetable-ai`);
-    console.log('🤖 Request data:', requestData);
+    // Transform the data to match the new Express backend format
+    const transformedData = transformDataForExpressBackend(requestData);
     
-    const response = await fetch(`${API_BASE_URL}/generate-timetable-ai`, {
+    console.log('🤖 Sending AI generation request to Express backend:', `${API_BASE_URL}/api/timetable/generate`);
+    console.log('🤖 Transformed request data:', transformedData);
+    
+    const response = await fetch(`${API_BASE_URL}/api/timetable/generate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(requestData)
+      body: JSON.stringify(transformedData)
     });
 
     console.log('📡 Response status:', response.status);
@@ -52,11 +108,11 @@ export const generateTimetableWithAI = async (requestData) => {
     let errorMessage = error.message;
     
     if (error.name === 'TypeError' && error.message.includes('fetch')) {
-      errorMessage = 'Cannot connect to backend server. Please ensure Firebase Functions emulator is running.';
+      errorMessage = 'Cannot connect to Express backend server. Please ensure the server is running on port 3000.';
     } else if (error.message.includes('ECONNREFUSED')) {
-      errorMessage = 'Connection refused. Backend server is not running.';
+      errorMessage = 'Connection refused. Express backend server is not running.';
     } else if (error.message.includes('404')) {
-      errorMessage = 'Backend endpoint not found. Check if the correct function is deployed.';
+      errorMessage = 'Backend endpoint not found. Check if Express server is running.';
     }
     
     return {
