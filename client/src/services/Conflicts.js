@@ -46,6 +46,25 @@ export const createConflict = (conflictType, conflictingTimetable, currentSlot, 
 };
 
 /**
+ * Check if two timetables are the same (comparing identifying properties)
+ * @param {Object} timetable1 - First timetable
+ * @param {Object} timetable2 - Second timetable
+ * @returns {boolean} True if timetables represent the same class
+ */
+export const areSameTimetables = (timetable1, timetable2) => {
+  if (!timetable1 || !timetable2) return false;
+  
+  // Compare all identifying properties
+  return (
+    timetable1.program === timetable2.program &&
+    timetable1.branch === timetable2.branch &&
+    timetable1.semester === timetable2.semester &&
+    timetable1.type === timetable2.type &&
+    (timetable1.batch || '') === (timetable2.batch || '')
+  );
+};
+
+/**
  * Check if two time slots have a teacher conflict
  * @param {Object} slot1 - First time slot
  * @param {Object} slot2 - Second time slot
@@ -114,20 +133,37 @@ export const getTimetableIdentifier = (timetable) => {
  * @param {Object} slotData - The slot data to check
  * @param {Array} timetablesToCheck - Array of timetables to check against
  * @param {string} excludeTimetableId - Timetable ID to exclude from checking
+ * @param {Object} currentTimetable - The current timetable being checked (for comparison)
  * @returns {Array} Array of conflicts found
  */
-export const checkSlotConflicts = (day, timeSlot, slotData, timetablesToCheck, excludeTimetableId = null) => {
+export const checkSlotConflicts = (day, timeSlot, slotData, timetablesToCheck, excludeTimetableId = null, currentTimetable = null) => {
   const conflicts = [];
   
   console.log(`Checking slot conflicts for ${day} ${timeSlot}:`, {
     slotData,
     timetablesToCheck: timetablesToCheck.length,
-    excludeTimetableId
+    excludeTimetableId,
+    currentTimetable: currentTimetable ? {
+      program: currentTimetable.program,
+      branch: currentTimetable.branch,
+      semester: currentTimetable.semester,
+      type: currentTimetable.type,
+      batch: currentTimetable.batch
+    } : null
   });
   
   for (const timetable of timetablesToCheck) {
     // Skip if this is the same timetable we're checking
     if (excludeTimetableId && timetable.id === excludeTimetableId) continue;
+    
+    // Skip if comparing with the same class (same program, branch, semester, type, batch)
+    if (currentTimetable && areSameTimetables(currentTimetable, timetable)) {
+      console.log(`Skipping same timetable comparison:`, {
+        current: getTimetableIdentifier(currentTimetable),
+        checking: getTimetableIdentifier(timetable)
+      });
+      continue;
+    }
     
     // Skip if timetable doesn't have this day or time slot
     if (!timetable[day] || !timetable[day][timeSlot]) continue;
@@ -206,12 +242,12 @@ export const embedConflictsInTimetable = (timetableToCheck, savedTimetables = []
         !checkedTimetableIds.has(tt.id) && tt.id !== timetableToCheck.id
       );
       
-      const unsavedConflicts = checkSlotConflicts(day, timeSlot, slotData, otherUnsavedTimetables);
+      const unsavedConflicts = checkSlotConflicts(day, timeSlot, slotData, otherUnsavedTimetables, timetableToCheck.id, timetableToCheck);
       allSlotConflicts.push(...unsavedConflicts);
       
       // Priority 2: Check against saved timetables (if no unsaved conflicts for same resource)
       const savedToCheck = savedTimetables.filter(tt => !checkedTimetableIds.has(tt.id));
-      const savedConflicts = checkSlotConflicts(day, timeSlot, slotData, savedToCheck);
+      const savedConflicts = checkSlotConflicts(day, timeSlot, slotData, savedToCheck, timetableToCheck.id, timetableToCheck);
       
       // Only add saved conflicts if we don't have unsaved conflicts for the same resource type
       savedConflicts.forEach(savedConflict => {
@@ -266,11 +302,11 @@ export const checkTimetableConflicts = (timetableToCheck, savedTimetables = [], 
         !checkedTimetableIds.has(tt.id) && tt.id !== timetableToCheck.id
       );
       
-      conflicts.push(...checkSlotConflicts(day, timeSlot, slotData, otherUnsavedTimetables));
+      conflicts.push(...checkSlotConflicts(day, timeSlot, slotData, otherUnsavedTimetables, timetableToCheck.id, timetableToCheck));
       
       // Priority 2: Check against saved timetables (excluding those already checked)
       const savedToCheck = savedTimetables.filter(tt => !checkedTimetableIds.has(tt.id));
-      conflicts.push(...checkSlotConflicts(day, timeSlot, slotData, savedToCheck));
+      conflicts.push(...checkSlotConflicts(day, timeSlot, slotData, savedToCheck, timetableToCheck.id, timetableToCheck));
       
       allConflicts[day][timeSlot] = conflicts;
     });
@@ -304,13 +340,17 @@ export const extractConflictsForDisplay = (timetableWithEmbeddedConflicts) => {
           
           const conflictDetails = `${program} ${branch} - Sem ${semester}${batch}`;
           
+          // Format day and time slot for better readability
+          const dayFormatted = day.charAt(0).toUpperCase() + day.slice(1);
+          const locationInfo = `[${dayFormatted} ${timeSlot}]`;
+          
           let message = '';
           if (conflict.conflictType === 'teacher') {
-            message = `Teacher "${conflict.conflictingResource}" is already teaching "${conflict.conflictingCourse || 'Unknown Course'}" for ${conflictDetails}`;
+            message = `${locationInfo} Teacher "${conflict.conflictingResource}" is already teaching "${conflict.conflictingCourse || 'Unknown Course'}" for ${conflictDetails}`;
           } else if (conflict.conflictType === 'room') {
-            message = `Room "${conflict.conflictingResource}" is already booked for "${conflict.conflictingCourse || 'Unknown Course'}" by ${conflictDetails}`;
+            message = `${locationInfo} Room "${conflict.conflictingResource}" is already booked for "${conflict.conflictingCourse || 'Unknown Course'}" by ${conflictDetails}`;
           } else {
-            message = `Conflict with ${conflictDetails}`;
+            message = `${locationInfo} Conflict with ${conflictDetails}`;
           }
           
           conflicts.push({
@@ -359,7 +399,8 @@ export const resolveConflicts = (timetableWithConflicts, savedTimetables = [], u
         timeSlot, 
         slot, 
         [...savedTimetables, ...unsavedTimetables],
-        updatedTimetable.id
+        updatedTimetable.id,
+        updatedTimetable
       );
       
       // Filter out resolved conflicts
@@ -480,10 +521,11 @@ export const getConflictStatistics = (timetable) => {
  * @param {Object} newSlotData - New slot data being entered
  * @param {Array} allTimetables - All timetables to check against
  * @param {string} excludeTimetableId - Current timetable ID to exclude
+ * @param {Object} currentTimetable - The current timetable being edited
  * @returns {Object} Immediate conflict check result
  */
-export const checkImmediateConflicts = (day, timeSlot, newSlotData, allTimetables, excludeTimetableId) => {
-  const conflicts = checkSlotConflicts(day, timeSlot, newSlotData, allTimetables, excludeTimetableId);
+export const checkImmediateConflicts = (day, timeSlot, newSlotData, allTimetables, excludeTimetableId, currentTimetable = null) => {
+  const conflicts = checkSlotConflicts(day, timeSlot, newSlotData, allTimetables, excludeTimetableId, currentTimetable);
   
   return {
     hasConflicts: conflicts.length > 0,

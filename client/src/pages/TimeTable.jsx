@@ -322,6 +322,20 @@ const TimeTable = () => {
       ...prev,
       [tabId]: displayConflicts
     }));
+
+    // If this is the active tab, update the conflicts state immediately
+    if (tabId === activeTabId) {
+      const allConflicts = [];
+      Object.keys(displayConflicts).forEach(day => {
+        Object.keys(displayConflicts[day]).forEach(timeSlot => {
+          const slotConflicts = displayConflicts[day][timeSlot] || [];
+          slotConflicts.forEach(conflict => {
+            allConflicts.push({ ...conflict, day, timeSlot });
+          });
+        });
+      });
+      setConflicts(allConflicts);
+    }
   };
 
   const getSlotConflicts = (day, timeSlot) => {
@@ -334,6 +348,28 @@ const TimeTable = () => {
     }
 
     return tabConflictsForTab[day][timeSlot];
+  };
+
+  const getAllConflictsForActiveTab = () => {
+    const activeTab = getActiveTab();
+    if (!activeTab) return [];
+
+    const tabConflictsForTab = tabConflicts[activeTab.id];
+    if (!tabConflictsForTab) return [];
+
+    const allConflicts = [];
+    Object.keys(tabConflictsForTab).forEach(day => {
+      Object.keys(tabConflictsForTab[day]).forEach(timeSlot => {
+        const slotConflicts = tabConflictsForTab[day][timeSlot] || [];
+        slotConflicts.forEach(conflict => {
+          if (!isConflictDismissed(conflict, day, timeSlot)) {
+            allConflicts.push({ ...conflict, day, timeSlot });
+          }
+        });
+      });
+    });
+
+    return allConflicts;
   };
 
   const hasSlotConflicts = (day, timeSlot) => {
@@ -373,10 +409,20 @@ const TimeTable = () => {
   const switchToTab = (tabId) => {
     setActiveTabId(tabId);
     
+    // Reset conflicts state to show only conflicts for the new active tab
+    setConflicts([]);
+    
     // Check conflicts for the newly active tab
     const tab = tabs.find(t => t.id === tabId);
     if (tab && currentTimetable) {
-      checkTabConflicts(tabId);
+      setTimeout(() => {
+        checkTabConflicts(tabId);
+        // Update the conflicts state with the new tab's conflicts
+        setTimeout(() => {
+          const newTabConflicts = getAllConflictsForActiveTab();
+          setConflicts(newTabConflicts);
+        }, 50);
+      }, 100);
     }
   };
 
@@ -408,6 +454,20 @@ const TimeTable = () => {
   // Process AI-generated timetables and create tabs automatically
   const processGeneratedTimetables = async (generatedTimetables) => {
     console.log('🔄 Processing generated timetables:', generatedTimetables.length);
+    
+    // Check if the first tab is empty and should be removed
+    const isFirstTabEmpty = tabs.length === 1 && 
+      tabs[0].id === 1 && 
+      !tabs[0].program && 
+      !tabs[0].branch && 
+      !tabs[0].semester && 
+      !tabs[0].type && 
+      !tabs[0].timetableId;
+    
+    // If first tab is empty, clear tabs array to start fresh
+    if (isFirstTabEmpty) {
+      setTabs([]);
+    }
     
     for (let i = 0; i < generatedTimetables.length; i++) {
       const timetableData = generatedTimetables[i];
@@ -774,7 +834,20 @@ const TimeTable = () => {
       isModified: false
     };
     
-    setTabs([...tabs, newTab]);
+    // Check if the first tab is empty and remove it
+    const isFirstTabEmpty = tabs.length === 1 && 
+      tabs[0].id === 1 && 
+      !tabs[0].program && 
+      !tabs[0].branch && 
+      !tabs[0].semester && 
+      !tabs[0].type && 
+      !tabs[0].timetableId;
+    
+    if (isFirstTabEmpty) {
+      setTabs([newTab]);
+    } else {
+      setTabs([...tabs, newTab]);
+    }
     setActiveTabId(nextTabId);
     setCurrentTimetable(timetable);
     setNextTabId(nextTabId + 1);
@@ -1359,24 +1432,6 @@ const TimeTable = () => {
         </div>
         )}
 
-        {/* Success/Error Messages */}
-        {(success || error) && (
-          <div className={`mx-4 mb-4 p-4 rounded-lg border ${
-            success ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'
-          }`}>
-            <div className="flex items-center gap-3">
-              {success ? <FaCheckCircle className="text-lg" /> : <FaExclamationTriangle className="text-lg" />}
-              <span className="font-medium">{success || error}</span>
-              <button
-                onClick={() => { setSuccess(''); setError(''); }}
-                className="ml-auto text-current hover:opacity-70"
-              >
-                <FaTimes />
-              </button>
-            </div>
-          </div>
-        )}
-
         <div className="flex flex-1 min-h-0">
           {/* Main Content */}
           <div className={`flex-1 px-4 pb-4 min-w-0 overflow-y-auto flex flex-col ${isFullscreen ? 'h-full' : ''}`}>
@@ -1841,9 +1896,15 @@ const TimeTable = () => {
                             {timetable.program} - {timetable.branch}
                           </div>
                           <div className="text-sm text-slate-600 flex items-center gap-3">
-                            <span>📚 Semester {timetable.semester}</span>
-                            <span>⏰ {timetable.type}</span>
-                            {timetable.batch && <span>👥 Batch {timetable.batch}</span>}
+                            <span>Semester {timetable.semester}</span>
+                            <span>•</span>
+                            <span>{timetable.type}</span>
+                            {timetable.batch && (
+                              <>
+                                <span>•</span>
+                                <span>Batch {timetable.batch}</span>
+                              </>
+                            )}
                           </div>
                           {timetable.createdAt && (
                             <div className="text-xs text-slate-400 mt-1">
@@ -2069,7 +2130,21 @@ const TimeTable = () => {
                             type: suggestion.type,
                             credits: suggestion.credits
                           };
-                          setAiClassRequests([...aiClassRequests, newRequest]);
+                          
+                          // Remove the initial empty row if it exists
+                          const isFirstRowEmpty = aiClassRequests.length === 1 && 
+                            !aiClassRequests[0].program && 
+                            !aiClassRequests[0].branch && 
+                            !aiClassRequests[0].semester && 
+                            !aiClassRequests[0].batch && 
+                            !aiClassRequests[0].type && 
+                            !aiClassRequests[0].credits;
+                          
+                          if (isFirstRowEmpty) {
+                            setAiClassRequests([newRequest]);
+                          } else {
+                            setAiClassRequests([...aiClassRequests, newRequest]);
+                          }
                         }}
                         className="px-3 py-2 bg-gray-100 hover:bg-indigo-600 hover:text-white rounded-lg text-xs font-medium transition-colors"
                       >
@@ -2238,6 +2313,25 @@ const TimeTable = () => {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI Generation Loader */}
+      {aiGenerating && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999]">
+          <div className="bg-white rounded-2xl p-8 shadow-2xl max-w-sm mx-4 text-center">
+            <div className="relative w-20 h-20 mx-auto mb-6">
+              {/* Outer spinning ring */}
+              <div className="absolute inset-0 border-4 border-indigo-200 rounded-full"></div>
+              <div className="absolute inset-0 border-4 border-transparent border-t-indigo-600 rounded-full animate-spin"></div>
+              {/* Inner pulsing dot */}
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="w-3 h-3 bg-indigo-600 rounded-full animate-pulse"></div>
+              </div>
+            </div>
+            <h3 className="text-xl font-semibold text-gray-800 mb-2">Generating Timetables</h3>
+            <p className="text-sm text-gray-500">AI is creating your timetables...</p>
           </div>
         </div>
       )}
