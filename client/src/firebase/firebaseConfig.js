@@ -14,6 +14,6 @@ const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, "tt-automation");
 
 // API Base URL for backend functions
-export const API_BASE_URL = import.meta.env.VITE_API_LOCAL_URL;
+export const API_BASE_URL = "https://tt-automation-backend.vercel.app";
 
 export default app;
