@@ -62,6 +62,9 @@ import {
 // Import API configuration
 import { API_BASE_URL } from '../firebase/firebaseConfig';
 
+// Import PDF export utilities
+import { exportSingleTimetableToPDF, exportAllTimetablesToPDF } from '../utils/pdfExport';
+
 const TimeTable = () => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -122,6 +125,22 @@ const TimeTable = () => {
   const [includeExistingTimetables, setIncludeExistingTimetables] = useState(false);
   const [selectedExistingTimetables, setSelectedExistingTimetables] = useState([]);
   const [aiGenerating, setAiGenerating] = useState(false);
+
+  // PDF Export modal
+  const [showPDFExportModal, setShowPDFExportModal] = useState(false);
+
+  // Save modal
+  const [showSaveModal, setShowSaveModal] = useState(false);
+
+  // B.Tech 1st Semester class suggestions
+  const classSuggestions = [
+    { program: 'B.Tech', branch: 'Computer Science', semester: '1', batch: 'A', type: 'full-time', credits: '24', label: 'B.Tech CS - Sem 1' },
+    { program: 'B.Tech', branch: 'Mechanical', semester: '1', batch: 'A', type: 'full-time', credits: '24', label: 'B.Tech ME - Sem 1' },
+    { program: 'B.Tech', branch: 'Electrical', semester: '1', batch: 'A', type: 'full-time', credits: '24', label: 'B.Tech EE - Sem 1' },
+    { program: 'B.Tech', branch: 'Civil', semester: '1', batch: 'A', type: 'full-time', credits: '24', label: 'B.Tech CE - Sem 1' },
+    { program: 'B.Tech', branch: 'Electronics', semester: '1', batch: 'A', type: 'full-time', credits: '24', label: 'B.Tech EC - Sem 1' },
+    { program: 'B.Tech', branch: 'Information Technology', semester: '1', batch: 'A', type: 'full-time', credits: '24', label: 'B.Tech IT - Sem 1' },
+  ];
 
   // Temporary data storage for unsaved changes
   const [tempTimetableData, setTempTimetableData] = useState({});
@@ -878,12 +897,46 @@ const TimeTable = () => {
     }
   };
 
-  const saveTimetable = async () => {
+  const handleSaveClick = () => {
+    console.log('Save button clicked');
+    console.log('Current timetable:', currentTimetable);
+    console.log('Active tab:', getActiveTab());
+    console.log('All tabs:', tabs);
+    
+    // Check if there are multiple modified tabs
+    const modifiedTabs = tabs.filter(tab => tab.isModified || !tab.timetableId);
+    console.log('Modified tabs:', modifiedTabs);
+    console.log('Modified tabs count:', modifiedTabs.length);
+    
+    if (modifiedTabs.length > 1) {
+      // Show modal to ask user
+      console.log('Showing save modal for multiple tabs');
+      console.log('Setting showSaveModal to true');
+      setShowSaveModal(true);
+      console.log('showSaveModal should be true now');
+    } else {
+      // Save only current timetable
+      console.log('Saving current timetable directly');
+      saveCurrentTimetable();
+    }
+  };
+
+  const saveCurrentTimetable = async () => {
+    setShowSaveModal(false);
     const activeTab = getActiveTab();
-    if (!activeTab) return;
+    if (!activeTab) {
+      console.error('No active tab found');
+      return;
+    }
 
     if (!activeTab.program || !activeTab.branch || !activeTab.semester || !activeTab.type) {
       setError('Please fill all required fields (Program, Branch, Semester, Type)');
+      return;
+    }
+
+    if (!currentTimetable) {
+      console.error('No current timetable data found');
+      setError('No timetable data to save');
       return;
     }
 
@@ -961,10 +1014,112 @@ const TimeTable = () => {
         // Reload timetables and statistics
         await loadInitialData();
       } else {
-        setError(result.error);
+        setError(result.error || 'Failed to save timetable');
       }
     } catch (err) {
-      setError('Failed to save timetable');
+      console.error('Error saving timetable:', err);
+      setError(`Failed to save timetable: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveAllOpenedTimetables = async () => {
+    setShowSaveModal(false);
+    setSaving(true);
+    setError('');
+    setSuccess('');
+
+    let savedCount = 0;
+    let errorCount = 0;
+
+    try {
+      for (const tab of tabs) {
+        // Skip tabs without required fields
+        if (!tab.program || !tab.branch || !tab.semester || !tab.type) {
+          continue;
+        }
+
+        // Get timetable data for this tab
+        const timetableData = {
+          program: tab.program,
+          branch: tab.branch,
+          semester: tab.semester,
+          type: tab.type
+        };
+
+        if (tab.batch) {
+          timetableData.batch = tab.batch;
+        }
+
+        if (tab.overallCredits) {
+          timetableData.overallCredits = tab.overallCredits;
+        }
+
+        // Get the timetable content for this tab
+        const tabTimetable = tab.timetableId 
+          ? timetables.find(tt => tt.id === tab.timetableId)
+          : tempTimetableData[tab.id] || currentTimetable;
+
+        if (tabTimetable) {
+          // Add schedule data
+          WEEKDAYS.forEach(day => {
+            if (tabTimetable[day]) {
+              const daySchedule = {};
+              Object.keys(tabTimetable[day]).forEach(timeSlot => {
+                const slot = tabTimetable[day][timeSlot];
+                if (slot && (slot.course || slot.teacher || slot.room)) {
+                  daySchedule[timeSlot] = {
+                    course: slot.course || '',
+                    teacher: slot.teacher || '',
+                    room: slot.room || ''
+                  };
+                }
+              });
+              if (Object.keys(daySchedule).length > 0) {
+                timetableData[day] = daySchedule;
+              }
+            }
+          });
+
+          // Save or update
+          let result;
+          if (tab.timetableId) {
+            result = await updateTimetable(tab.timetableId, timetableData);
+          } else {
+            result = await addTimetable(timetableData);
+          }
+
+          if (result.success) {
+            savedCount++;
+            // Update tab to mark as saved
+            const updatedTabs = tabs.map(t => {
+              if (t.id === tab.id) {
+                return {
+                  ...t,
+                  timetableId: result.data.id,
+                  isModified: false
+                };
+              }
+              return t;
+            });
+            setTabs(updatedTabs);
+          } else {
+            errorCount++;
+          }
+        }
+      }
+
+      // Reload data
+      await loadInitialData();
+
+      if (savedCount > 0) {
+        setSuccess(`Successfully saved ${savedCount} timetable(s)${errorCount > 0 ? `, ${errorCount} failed` : ''}!`);
+      } else {
+        setError('No timetables were saved. Please check required fields.');
+      }
+    } catch (err) {
+      setError('Failed to save timetables');
     } finally {
       setSaving(false);
     }
@@ -1075,6 +1230,47 @@ const TimeTable = () => {
 
     setTabs([...tabs, ...newTabs]);
     setNextTabId(nextTabId + batches.length - 1);
+  };
+
+  const handleExportToPDF = () => {
+    setShowPDFExportModal(true);
+  };
+
+  const exportCurrentTimetableToPDF = () => {
+    const activeTab = getActiveTab();
+    if (!activeTab || !currentTimetable) {
+      alert('No timetable to export');
+      return;
+    }
+
+    if (!activeTab.program || !activeTab.branch || !activeTab.semester) {
+      alert('Please fill in required fields (Program, Branch, Semester) before exporting');
+      return;
+    }
+
+    const timetableData = {
+      ...currentTimetable,
+      program: activeTab.program,
+      branch: activeTab.branch,
+      semester: activeTab.semester,
+      type: activeTab.type,
+      batch: activeTab.batch
+    };
+
+    exportSingleTimetableToPDF(timetableData);
+    setShowPDFExportModal(false);
+    setSuccess('PDF exported successfully!');
+  };
+
+  const exportAllTimetablesPDF = () => {
+    if (timetables.length === 0) {
+      alert('No saved timetables to export');
+      return;
+    }
+
+    exportAllTimetablesToPDF(timetables);
+    setShowPDFExportModal(false);
+    setSuccess(`All ${timetables.length} timetable(s) exported successfully!`);
   };
 
   const activeTab = getActiveTab();
@@ -1492,16 +1688,19 @@ const TimeTable = () => {
               <h4 className="font-medium text-slate-700 mb-2 text-xs">Actions</h4>
               <div className="space-y-2">
                 <button 
-                  onClick={saveTimetable}
+                  onClick={handleSaveClick}
                   disabled={saving}
                   className="w-full px-3 py-2 bg-slate-700 text-white rounded-lg font-medium hover:bg-slate-800 disabled:bg-slate-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2 text-xs"
                 >
                   {saving ? <FaSpinner className="animate-spin text-xs" /> : <FiSave className="text-xs" />}
                   {saving ? 'Saving...' : 'Save Timetable'}
                 </button>
-                <button className="w-full px-3 py-2 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 transition-colors flex items-center gap-2 text-xs">
+                <button 
+                  onClick={handleExportToPDF}
+                  className="w-full px-3 py-2 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 transition-colors flex items-center gap-2 text-xs"
+                >
                   <FiDownload className="text-xs" />
-                  Export
+                  Export PDF
                 </button>
                 <button className="w-full px-3 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center gap-2 text-xs">
                   <FiUpload className="text-xs" />
@@ -1675,138 +1874,314 @@ const TimeTable = () => {
         </div>
       )}
 
-      {/* AI Generation Modal */}
-      {showAIModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto m-4 shadow-2xl">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-                <FaRobot className="text-indigo-600" />
-                Generate Timetable with AI
-              </h2>
+      {/* Save Modal */}
+      {showSaveModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl w-full max-w-md shadow-xl">
+            {/* Header */}
+            <div className="bg-slate-700 px-6 py-4 flex items-center justify-between rounded-t-xl">
+              <div className="flex items-center gap-3">
+                <FiSave className="text-white text-xl" />
+                <h2 className="text-xl font-semibold text-white">Save Timetable</h2>
+              </div>
               <button
-                onClick={() => setShowAIModal(false)}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                onClick={() => setShowSaveModal(false)}
+                className="text-white/80 hover:text-white"
               >
-                <FaTimes className="text-gray-600" />
+                <FaTimes className="text-lg" />
               </button>
             </div>
 
-            <div className="space-y-6">
-              {/* Class Requests */}
-              <div>
-                <h3 className="text-lg font-semibold text-gray-700 mb-3">Class/Course Definitions</h3>
-                <p className="text-sm text-gray-600 mb-4">Define the classes/courses for which you want to generate timetables:</p>
-                
-                {/* Header Row */}
-                <div className="grid grid-cols-7 gap-2 mb-2 text-sm font-semibold text-gray-600 px-2">
-                  <span>Program</span>
-                  <span>Branch</span>
-                  <span>Semester</span>
-                  <span>Batch</span>
-                  <span>Type</span>
-                  <span>Credits</span>
-                  <span>Action</span>
-                </div>
-
-                {/* Class Request Rows */}
-                {aiClassRequests.map((request, index) => (
-                  <div key={index} className="grid grid-cols-7 gap-2 mb-2 p-2 bg-gray-50 rounded-lg">
-                    <input
-                      type="text"
-                      placeholder="BCA"
-                      value={request.program}
-                      onChange={(e) => updateClassRequest(index, 'program', e.target.value)}
-                      className="px-2 py-1 border rounded text-sm"
-                    />
-                    <input
-                      type="text"
-                      placeholder="CS"
-                      value={request.branch}
-                      onChange={(e) => updateClassRequest(index, 'branch', e.target.value)}
-                      className="px-2 py-1 border rounded text-sm"
-                    />
-                    <input
-                      type="text"
-                      placeholder="1"
-                      value={request.semester}
-                      onChange={(e) => updateClassRequest(index, 'semester', e.target.value)}
-                      className="px-2 py-1 border rounded text-sm"
-                    />
-                    <input
-                      type="text"
-                      placeholder="A"
-                      value={request.batch}
-                      onChange={(e) => updateClassRequest(index, 'batch', e.target.value)}
-                      className="px-2 py-1 border rounded text-sm"
-                    />
-                    <select
-                      value={request.type}
-                      onChange={(e) => updateClassRequest(index, 'type', e.target.value)}
-                      className="px-2 py-1 border rounded text-sm"
-                    >
-                      <option value="">Select</option>
-                      <option value="full-time">Full Time</option>
-                      <option value="part-time">Part Time</option>
-                    </select>
-                    <input
-                      type="number"
-                      placeholder="120"
-                      value={request.credits}
-                      onChange={(e) => updateClassRequest(index, 'credits', e.target.value)}
-                      className="px-2 py-1 border rounded text-sm"
-                      min="1"
-                      max="200"
-                    />
-                    <button
-                      onClick={() => removeClassRequest(index)}
-                      className="px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600 transition-colors text-sm"
-                      disabled={aiClassRequests.length === 1}
-                    >
-                      <FaTimes />
-                    </button>
-                  </div>
-                ))}
-
-                {/* Add Row Button */}
+            <div className="p-6">
+              <p className="text-gray-600 mb-6">Choose what you want to save:</p>
+              
+              <div className="space-y-3">
+                {/* Current Timetable Option */}
                 <button
-                  onClick={addClassRequest}
-                  className="mt-2 px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors text-sm flex items-center gap-2"
+                  onClick={saveCurrentTimetable}
+                  className="w-full p-4 border-2 border-gray-200 rounded-lg hover:border-slate-500 hover:bg-slate-50 transition-all text-left group"
                 >
-                  <FaPlus />
-                  Add Another Class
+                  <div className="flex items-center gap-3">
+                    <div className="bg-slate-100 group-hover:bg-slate-200 p-3 rounded-lg transition-colors">
+                      <FaCalendarAlt className="text-slate-600 text-xl" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-gray-800 group-hover:text-slate-700">Current Timetable</h3>
+                      <p className="text-sm text-gray-600">Save only the active/opened timetable</p>
+                      {activeTab && activeTab.program && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          {activeTab.program} - {activeTab.branch} - Sem {activeTab.semester}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </button>
+
+                {/* All Opened Timetables Option */}
+                <button
+                  onClick={saveAllOpenedTimetables}
+                  className="w-full p-4 border-2 border-gray-200 rounded-lg hover:border-slate-500 hover:bg-slate-50 transition-all text-left group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="bg-indigo-100 group-hover:bg-indigo-200 p-3 rounded-lg transition-colors">
+                      <FaCopy className="text-indigo-600 text-xl" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-gray-800 group-hover:text-indigo-700">All Opened Timetables</h3>
+                      <p className="text-sm text-gray-600">Save all timetables currently in tabs</p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {tabs.length} tab(s) opened
+                      </p>
+                    </div>
+                  </div>
                 </button>
               </div>
+            </div>
 
-              {/* Existing Timetables Option */}
-              <div className="border-t pt-4">
-                <div className="flex items-center gap-3 mb-3">
-                  <input
-                    type="checkbox"
-                    id="includeExisting"
-                    checked={includeExistingTimetables}
-                    onChange={(e) => setIncludeExistingTimetables(e.target.checked)}
-                    className="rounded"
-                  />
-                  <label htmlFor="includeExisting" className="text-sm font-medium text-gray-700">
-                    Include existing timetables in generation
-                  </label>
+            {/* Footer */}
+            <div className="border-t px-6 py-4 bg-gray-50 flex justify-end rounded-b-xl">
+              <button
+                onClick={() => setShowSaveModal(false)}
+                className="px-5 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors text-sm font-medium"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PDF Export Modal */}
+      {showPDFExportModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl w-full max-w-md shadow-xl">
+            {/* Header */}
+            <div className="bg-emerald-600 px-6 py-4 flex items-center justify-between rounded-t-xl">
+              <div className="flex items-center gap-3">
+                <FiDownload className="text-white text-xl" />
+                <h2 className="text-xl font-semibold text-white">Export to PDF</h2>
+              </div>
+              <button
+                onClick={() => setShowPDFExportModal(false)}
+                className="text-white/80 hover:text-white"
+              >
+                <FaTimes className="text-lg" />
+              </button>
+            </div>
+
+            <div className="p-6">
+              <p className="text-gray-600 mb-6">Choose what you want to export:</p>
+              
+              <div className="space-y-3">
+                {/* Current Timetable Option */}
+                <button
+                  onClick={exportCurrentTimetableToPDF}
+                  className="w-full p-4 border-2 border-gray-200 rounded-lg hover:border-emerald-500 hover:bg-emerald-50 transition-all text-left group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="bg-emerald-100 group-hover:bg-emerald-200 p-3 rounded-lg transition-colors">
+                      <FaCalendarAlt className="text-emerald-600 text-xl" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-gray-800 group-hover:text-emerald-700">Current Timetable</h3>
+                      <p className="text-sm text-gray-600">Export only the opened timetable</p>
+                      {activeTab && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          {activeTab.program} - {activeTab.branch} - Sem {activeTab.semester}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </button>
+
+                {/* All Timetables Option */}
+                <button
+                  onClick={exportAllTimetablesPDF}
+                  className="w-full p-4 border-2 border-gray-200 rounded-lg hover:border-emerald-500 hover:bg-emerald-50 transition-all text-left group"
+                  disabled={timetables.length === 0}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="bg-indigo-100 group-hover:bg-indigo-200 p-3 rounded-lg transition-colors">
+                      <FaCopy className="text-indigo-600 text-xl" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-gray-800 group-hover:text-indigo-700">All Timetables</h3>
+                      <p className="text-sm text-gray-600">Export all saved timetables in one PDF</p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {timetables.length} timetable(s) available
+                      </p>
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="border-t px-6 py-4 bg-gray-50 flex justify-end rounded-b-xl">
+              <button
+                onClick={() => setShowPDFExportModal(false)}
+                className="px-5 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors text-sm font-medium"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI Generation Modal */}
+      {showAIModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl w-full max-w-4xl max-h-[90vh] overflow-hidden shadow-xl">
+            {/* Header */}
+            <div className="bg-indigo-600 px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <FaRobot className="text-white text-xl" />
+                <h2 className="text-xl font-semibold text-white">Generate with AI</h2>
+              </div>
+              <button
+                onClick={() => setShowAIModal(false)}
+                className="text-white/80 hover:text-white"
+              >
+                <FaTimes className="text-lg" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto max-h-[calc(90vh-160px)]">
+              <div className="space-y-5">
+                {/* Quick Suggestions */}
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <FaMagic className="text-indigo-600 text-sm" />
+                    <h3 className="text-sm font-semibold text-gray-700">Quick Add (B.Tech Sem 1)</h3>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {classSuggestions.map((suggestion, index) => (
+                      <button
+                        key={index}
+                        onClick={() => {
+                          const newRequest = {
+                            id: Date.now(),
+                            program: suggestion.program,
+                            branch: suggestion.branch,
+                            semester: suggestion.semester,
+                            batch: suggestion.batch,
+                            type: suggestion.type,
+                            credits: suggestion.credits
+                          };
+                          setAiClassRequests([...aiClassRequests, newRequest]);
+                        }}
+                        className="px-3 py-2 bg-gray-100 hover:bg-indigo-600 hover:text-white rounded-lg text-xs font-medium transition-colors"
+                      >
+                        {suggestion.branch}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                {includeExistingTimetables && (
-                  <div className="bg-gray-50 p-4 rounded-lg">
-                    <p className="text-sm text-gray-600 mb-3">
-                      Select existing timetables to include (AI will avoid conflicts):
-                    </p>
-                    <div className="space-y-2 max-h-40 overflow-y-auto">
+                {/* Class Requests */}
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold text-gray-700">Classes ({aiClassRequests.length})</h3>
+                  </div>
+                  
+                  {/* Class Request Rows */}
+                  <div className="space-y-2">
+                    {aiClassRequests.map((request, index) => (
+                      <div key={index} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                        <div className="grid grid-cols-2 md:grid-cols-7 gap-2">
+                          <input
+                            type="text"
+                            placeholder="Program"
+                            value={request.program}
+                            onChange={(e) => updateClassRequest(index, 'program', e.target.value)}
+                            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Branch"
+                            value={request.branch}
+                            onChange={(e) => updateClassRequest(index, 'branch', e.target.value)}
+                            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Sem"
+                            value={request.semester}
+                            onChange={(e) => updateClassRequest(index, 'semester', e.target.value)}
+                            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Batch"
+                            value={request.batch}
+                            onChange={(e) => updateClassRequest(index, 'batch', e.target.value)}
+                            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+                          />
+                          <select
+                            value={request.type}
+                            onChange={(e) => updateClassRequest(index, 'type', e.target.value)}
+                            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-white"
+                          >
+                            <option value="">Type</option>
+                            <option value="full-time">Full</option>
+                            <option value="part-time">Part</option>
+                          </select>
+                          <input
+                            type="number"
+                            placeholder="Credits"
+                            value={request.credits}
+                            onChange={(e) => updateClassRequest(index, 'credits', e.target.value)}
+                            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+                            min="1"
+                            max="200"
+                          />
+                          <button
+                            onClick={() => removeClassRequest(index)}
+                            className="px-3 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                            disabled={aiClassRequests.length === 1}
+                          >
+                            <FaTimes />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Add Button */}
+                  <button
+                    onClick={addClassRequest}
+                    className="mt-3 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm rounded-lg transition-colors flex items-center gap-2"
+                  >
+                    <FaPlus />
+                    Add Class
+                  </button>
+                </div>
+
+                {/* Existing Timetables Option */}
+                <div>
+                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={includeExistingTimetables}
+                      onChange={(e) => setIncludeExistingTimetables(e.target.checked)}
+                      className="w-4 h-4 text-indigo-600 rounded"
+                    />
+                    Include existing timetables
+                  </label>
+
+                  {includeExistingTimetables && (
+                    <div className="mt-3 space-y-2 max-h-48 overflow-y-auto">
                       {timetables.length === 0 ? (
-                        <p className="text-sm text-gray-500 italic">No existing timetables found</p>
+                        <p className="text-xs text-gray-500 py-4 text-center">No existing timetables</p>
                       ) : (
                         timetables.map((timetable) => (
-                          <div key={timetable.id} className="flex items-start gap-2 p-2 bg-white rounded border">
+                          <label 
+                            key={timetable.id} 
+                            className="flex items-start gap-2 p-3 bg-gray-50 hover:bg-gray-100 rounded-lg cursor-pointer border border-gray-200"
+                          >
                             <input 
                               type="checkbox" 
-                              id={`existing-${timetable.id}`}
                               checked={selectedExistingTimetables.includes(timetable.id)}
                               onChange={(e) => {
                                 if (e.target.checked) {
@@ -1815,45 +2190,51 @@ const TimeTable = () => {
                                   setSelectedExistingTimetables(selectedExistingTimetables.filter(id => id !== timetable.id));
                                 }
                               }}
-                              className="rounded mt-1" 
+                              className="w-4 h-4 text-indigo-600 rounded mt-0.5"
                             />
-                            <label htmlFor={`existing-${timetable.id}`} className="text-sm flex-1 cursor-pointer">
-                              <div className="font-medium text-gray-800">
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium text-gray-800 truncate">
                                 {timetable.program} - {timetable.branch}
                               </div>
-                              <div className="text-xs text-gray-600 flex items-center gap-2">
-                                <span>📚 Semester {timetable.semester}</span>
-                                <span>⏰ {timetable.type}</span>
-                                {timetable.batch && <span>👥 Batch {timetable.batch}</span>}
+                              <div className="flex gap-2 mt-1 text-xs text-gray-600">
+                                <span>Sem {timetable.semester}</span>
+                                <span>•</span>
+                                <span className="capitalize">{timetable.type}</span>
+                                {timetable.batch && (
+                                  <>
+                                    <span>•</span>
+                                    <span>Batch {timetable.batch}</span>
+                                  </>
+                                )}
                               </div>
-                              {timetable.createdAt && (
-                                <div className="text-xs text-gray-400 mt-1">
-                                  Created: {new Date(timetable.createdAt.seconds * 1000).toLocaleDateString()}
-                                </div>
-                              )}
-                            </label>
-                          </div>
+                            </div>
+                          </label>
                         ))
                       )}
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
+            </div>
 
-              {/* Action Buttons */}
-              <div className="flex justify-end gap-3 pt-4 border-t">
+            {/* Footer */}
+            <div className="border-t border-gray-200 px-6 py-4 bg-gray-50 flex items-center justify-between">
+              <span className="text-sm text-gray-600">
+                {aiClassRequests.length} class{aiClassRequests.length !== 1 ? 'es' : ''} ready
+              </span>
+              <div className="flex gap-3">
                 <button
                   onClick={() => setShowAIModal(false)}
-                  className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors"
+                  className="px-5 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors text-sm font-medium"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleGenerateWithAI}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2"
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors text-sm font-medium flex items-center gap-2"
                 >
                   <FaRobot />
-                  Generate Timetable
+                  Generate
                 </button>
               </div>
             </div>

@@ -252,9 +252,19 @@ export const parseAndValidateCSV = (csvText) => {
       }
 
       // Validate credits is a number
-      const credits = parseInt(course.credits);
+      console.log(`Row ${i + 1}: Validating credits for course:`, course);
+      console.log(`Row ${i + 1}: Credits value:`, course.credits);
+      console.log(`Row ${i + 1}: Credits value type:`, typeof course.credits);
+      console.log(`Row ${i + 1}: Credits after trim:`, course.credits?.trim());
+      
+      const creditsValue = course.credits?.toString().trim() || '';
+      const credits = parseInt(creditsValue);
+      
+      console.log(`Row ${i + 1}: Parsed credits:`, credits);
+      console.log(`Row ${i + 1}: isNaN(credits):`, isNaN(credits));
+      
       if (isNaN(credits) || credits < 1 || credits > 10) {
-        errors.push(`Row ${i + 1}: Credits must be a number between 1 and 10`);
+        errors.push(`Row ${i + 1}: Credits must be a number between 1 and 10. Found: '${course.credits}' (type: ${typeof course.credits})`);
         continue;
       }
 

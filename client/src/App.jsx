@@ -4,15 +4,26 @@ import TimeTable from './pages/TimeTable'
 import CourseLoad from './pages/CourseLoad'
 import RoomLoad from './pages/RoomLoad'
 import TeacherLoad from './pages/TeacherLoad'
+import Login from './pages/Login'
+import Signup from './pages/Signup'
+// In App.jsx
+import ExportDataPage from './pages/ExportData'
+import ClassCurriculum from './pages/ClassCurriculum'
+
+
 
 function App() {
   return (
     <Router>
           <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
             <Route path="/" element={<TimeTable />} />
             <Route path="/courses" element={<CourseLoad />} />
             <Route path="/teachers" element={<TeacherLoad />} />
             <Route path="/rooms" element={<RoomLoad />} />
+            <Route path="/export" element={<ExportDataPage />} />
+            <Route path="/curriculum" element={<ClassCurriculum />} />
           </Routes>
     </Router>
   )

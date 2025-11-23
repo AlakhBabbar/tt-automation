@@ -8,7 +8,8 @@ import {
   FaChevronLeft, 
   FaChevronRight,
   FaBolt,
-  FaGraduationCap
+  FaGraduationCap,
+  FaClipboardList
 } from 'react-icons/fa';
 import { 
   FiCalendar, 
@@ -35,6 +36,12 @@ const Menu = () => {
       icon: FaCalendarAlt,
       label: 'Timetable',
       description: 'View & create schedules'
+    },
+    {
+      path: '/curriculum',
+      icon: FaClipboardList,
+      label: 'Curriculum',
+      description: 'Manage class curriculum'
     },
     {
       path: '/courses',
