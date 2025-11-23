@@ -52,10 +52,63 @@ class TimetableGenerationService {
 You are a professional timetable scheduling expert. Generate conflict-free timetables for educational institutions.
 
 CRITICAL REQUIREMENTS:
-1. NO CONFLICTS: Each teacher can only be in one place at one time
-2. NO ROOM DOUBLE-BOOKING: Each room can only have one class at a time
-3. RESPECT CREDIT LIMITS: Don't exceed the overall credits specified for each class
-4. MANDATORY JSON FORMAT: Return ONLY valid JSON, no explanations
+1. TEACHER AVAILABILITY — NO TEACHER CAN BE IN TWO PLACES AT THE SAME TIME
+
+If a teacher is assigned to one class on a specific day and time slot, that same teacher cannot appear in any other class scheduled during that exact day and time.
+
+Example:
+
+❌ Wrong: Teacher A teaches Class 1 on Monday 10:00–11:00 and Class 2 on Monday 10:00–11:00.
+
+✔ Correct: Teacher A teaches Class 1 on Monday 10:00–11:00, and Class 2 at a different time (e.g., Monday 11:00–12:00 or Tuesday).
+
+2. ROOM AVAILABILITY — NO ROOM CAN BE USED BY TWO CLASSES AT THE SAME TIME
+
+A room can host only one class during a specific day and time slot.
+
+Example:
+
+❌ Wrong: Room 101 is used for Class A and Class B on Tuesday 9:00-10:00.
+
+✔ Correct: Room 101 is used for Class A on Tuesday 9:00-10:00, and Class B at any other time.
+
+3. CREDIT LIMITS MUST NOT BE EXCEEDED
+
+Each class has a maximum credit limit (e.g., 3 credits, 4 credits, etc.).
+
+The total number of scheduled sessions must not exceed the assigned credit value.
+
+Example:
+
+If a subject has 3 credits, the final timetable cannot schedule that subject for more than 3 sessions per week.
+
+4. STRICT JSON OUTPUT (NO TEXT OUTSIDE JSON)
+
+The AI must return ONLY valid JSON, not even a single extra word or explanation.
+
+If the output has any non-JSON text, it is considered INVALID.
+
+5. ABSOLUTE CONFLICT PREVENTION LOGIC (SIMPLIFIED RULES FOR AI)
+
+For every scheduled entry:
+
+Check the teacher → ensure they are not already scheduled at the same day & time.
+
+Check the room → ensure it is not already assigned at the same day & time.
+
+Check the class → ensure total sessions do not exceed its credit count.
+
+6. TIME SLOTS MUST BE TREATED AS ATOMIC & EXACT
+
+A time slot is considered a single block.
+
+Two blocks clash if their day AND time slot match exactly.
+
+7. OUTPUT MUST FOLLOW THESE RULES 100% OF THE TIME
+
+If a conflict is detected → the AI MUST automatically adjust, remove, or reschedule the class.
+
+Under no condition should a conflicting timetable be produced.
 
 INPUT DATA:
 Classes: ${JSON.stringify(classes, null, 2)}
