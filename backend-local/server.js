@@ -65,13 +65,13 @@ app.get('/', (req, res) => {
 app.use(notFound);
 app.use(errorHandler);
 
-// Start server
-const server = app.listen(config.port, () => {
-  console.log(`🚀 Server running on port ${config.port}`);
-  console.log(`📍 Environment: ${config.nodeEnv}`);
-  console.log(`🌐 Access server at: http://localhost:${config.port}`);
-  console.log(`🔗 API endpoints available at: http://localhost:${config.port}/api`);
-});
+// // Start server
+// const server = app.listen(config.port, () => {
+//   console.log(`🚀 Server running on port ${config.port}`);
+//   console.log(`📍 Environment: ${config.nodeEnv}`);
+//   console.log(`🌐 Access server at: http://localhost:${config.port}`);
+//   console.log(`🔗 API endpoints available at: http://localhost:${config.port}/api`);
+// });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
