@@ -556,4 +556,4 @@ For issues, questions, or contributions:
 
 **Built with:** Node.js, React, OpenAI API, and Firebase
 
-**Author:** Alakh Babbar
+**Author:** Alakh Babbar, Vaibhav Kaushal
